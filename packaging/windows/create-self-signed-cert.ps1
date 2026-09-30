@@ -8,6 +8,7 @@ $ErrorActionPreference = "Stop"
 $resolvedDir = (Resolve-Path -LiteralPath $OutputDir).Path
 $password = "WorkQ-" + [Guid]::NewGuid().ToString("N") + "!"
 $pfxPath = Join-Path $resolvedDir "workq-ci-cert.pfx"
+$passwordPath = Join-Path $resolvedDir "workq-ci-cert-password.txt"
 
 $cert = New-SelfSignedCertificate `
     -Type CodeSigningCert `
@@ -23,7 +24,11 @@ $cert = New-SelfSignedCertificate `
 $securePassword = ConvertTo-SecureString -String $password -Force -AsPlainText
 Export-PfxCertificate -Cert $cert -FilePath $pfxPath -Password $securePassword | Out-Null
 
-"WORKQ_CERT_PASSWORD=$password" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
-"WORKQ_CERT_PATH=$pfxPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+Set-Content -LiteralPath $passwordPath -Value $password -Encoding ascii
+
+if ($env:GITHUB_ENV) {
+    "WORKQ_CERT_PASSWORD=$password" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding ascii
+    "WORKQ_CERT_PATH=$pfxPath" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding ascii
+}
 
 Write-Output "Created self-signed code signing certificate: $pfxPath"

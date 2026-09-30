@@ -45,7 +45,7 @@ jobs:
           python3 -m pip install --disable-pip-version-check -q Pillow
           python3 - <<'PY'
           from PIL import Image
-          Image.open("icon.png").resize((512, 512), Image.LANCZOS).save("icon-512.png", format="PNG")
+          Image.open("icon.png").resize((512, 512), Image.LANCZOS).save("workq.png", format="PNG")
           PY
           cd build
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
@@ -53,7 +53,7 @@ jobs:
           chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
           ./linuxdeploy-x86_64.AppImage --appdir AppDir --executable WorkQ \
             --desktop-file ../packaging/linux/WorkQ.desktop \
-            --icon-file ../icon-512.png \
+            --icon-file ../workq.png \
             --plugin qt \
             --output appimage
 
@@ -254,19 +254,17 @@ jobs:
         run: |
           windeployqt --release --compiler-runtime $env:RELEASE_EXE
 
-      - name: Sign binaries with self-signed certificate
+      - name: Sign binaries and build NSIS installer
         shell: pwsh
         run: |
           powershell -ExecutionPolicy Bypass -File packaging\windows\create-self-signed-cert.ps1 -OutputDir $env:RUNNER_TEMP
+          $certPath = Join-Path $env:RUNNER_TEMP "workq-ci-cert.pfx"
+          $certPassword = (Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP "workq-ci-cert-password.txt") -Raw).Trim()
           $releaseDir = Split-Path -Parent $env:RELEASE_EXE
           Get-ChildItem -Path $releaseDir -Recurse -File | Where-Object { $_.Extension -in '.exe', '.dll' } | ForEach-Object {
-            & signtool sign /f $env:WORKQ_CERT_PATH /p $env:WORKQ_CERT_PASSWORD /fd SHA256 $_.FullName
+            & signtool sign /f $certPath /p $certPassword /fd SHA256 $_.FullName
             if ($LASTEXITCODE -ne 0) { throw "signtool failed: $($_.FullName)" }
           }
-
-      - name: Build NSIS installer
-        shell: pwsh
-        run: |
           $nsis = 'C:\Program Files (x86)\NSIS\makensis.exe'
           if (-not (Test-Path $nsis) -and -not (Get-Command makensis -ErrorAction SilentlyContinue)) {
             choco install nsis -y --no-progress
@@ -279,12 +277,9 @@ jobs:
           $releaseDir = Split-Path -Parent $env:RELEASE_EXE
           & $makensis.Source "/DVERSION=$env:VERSION" "/DARCH=x86_64" "/DSOURCE_DIR=$releaseDir" "/DOUTPUT_DIR=$env:GITHUB_WORKSPACE" "$env:GITHUB_WORKSPACE\packaging\windows\installer.nsi"
           if ($LASTEXITCODE -ne 0) { throw "makensis failed" }
-
-      - name: Sign installer
-        shell: pwsh
-        run: |
           $installer = "WorkQ-$env:VERSION-windows-x86_64-setup.exe"
-          & signtool sign /f $env:WORKQ_CERT_PATH /p $env:WORKQ_CERT_PASSWORD /fd SHA256 $installer
+          if (-not (Test-Path $installer)) { throw "Installer not found: $installer" }
+          & signtool sign /f $certPath /p $certPassword /fd SHA256 $installer
           if ($LASTEXITCODE -ne 0) { throw "signtool failed: $installer" }
 
       - name: Upload installer
@@ -345,21 +340,20 @@ jobs:
       - name: Deploy Qt runtime
         shell: pwsh
         run: |
+          $env:Path = "$env:QT_HOST_PATH\bin;$env:Path"
           windeployqt --release --compiler-runtime $env:RELEASE_EXE
 
-      - name: Sign binaries with self-signed certificate
+      - name: Sign binaries and build NSIS installer
         shell: pwsh
         run: |
           powershell -ExecutionPolicy Bypass -File packaging\windows\create-self-signed-cert.ps1 -OutputDir $env:RUNNER_TEMP
+          $certPath = Join-Path $env:RUNNER_TEMP "workq-ci-cert.pfx"
+          $certPassword = (Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP "workq-ci-cert-password.txt") -Raw).Trim()
           $releaseDir = Split-Path -Parent $env:RELEASE_EXE
           Get-ChildItem -Path $releaseDir -Recurse -File | Where-Object { $_.Extension -in '.exe', '.dll' } | ForEach-Object {
-            & signtool sign /f $env:WORKQ_CERT_PATH /p $env:WORKQ_CERT_PASSWORD /fd SHA256 $_.FullName
+            & signtool sign /f $certPath /p $certPassword /fd SHA256 $_.FullName
             if ($LASTEXITCODE -ne 0) { throw "signtool failed: $($_.FullName)" }
           }
-
-      - name: Build NSIS installer
-        shell: pwsh
-        run: |
           $nsis = 'C:\Program Files (x86)\NSIS\makensis.exe'
           if (-not (Test-Path $nsis) -and -not (Get-Command makensis -ErrorAction SilentlyContinue)) {
             choco install nsis -y --no-progress
@@ -372,12 +366,9 @@ jobs:
           $releaseDir = Split-Path -Parent $env:RELEASE_EXE
           & $makensis.Source "/DVERSION=$env:VERSION" "/DARCH=arm64" "/DSOURCE_DIR=$releaseDir" "/DOUTPUT_DIR=$env:GITHUB_WORKSPACE" "$env:GITHUB_WORKSPACE\packaging\windows\installer.nsi"
           if ($LASTEXITCODE -ne 0) { throw "makensis failed" }
-
-      - name: Sign installer
-        shell: pwsh
-        run: |
           $installer = "WorkQ-$env:VERSION-windows-arm64-setup.exe"
-          & signtool sign /f $env:WORKQ_CERT_PATH /p $env:WORKQ_CERT_PASSWORD /fd SHA256 $installer
+          if (-not (Test-Path $installer)) { throw "Installer not found: $installer" }
+          & signtool sign /f $certPath /p $certPassword /fd SHA256 $installer
           if ($LASTEXITCODE -ne 0) { throw "signtool failed: $installer" }
 
       - name: Upload installer
