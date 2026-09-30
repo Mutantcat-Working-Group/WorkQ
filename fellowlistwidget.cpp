@@ -75,6 +75,24 @@ void FellowListWidget::mark(const Fellow &fellow, const QString &info)
     }
 }
 
+void FellowListWidget::remove(const Fellow &fellow)
+{
+    auto item = findFirstItem(fellow);
+    if (item != nullptr)
+        delete mWidget->takeItem(mWidget->row(item));
+}
+
+void FellowListWidget::removeRemote()
+{
+    for (int i = mWidget->count() - 1; i >= 0; --i)
+    {
+        auto item = mWidget->item(i);
+        auto fellow = getFellow(item);
+        if (fellow && fellow->isRemote())
+            delete mWidget->takeItem(i);
+    }
+}
+
 void FellowListWidget::setRankPredict(FellowListWidget::RankPredict predict)
 {
     mRankPredict = predict;
@@ -91,12 +109,19 @@ void FellowListWidget::itemChosen(QListWidgetItem *item)
 
 QString FellowListWidget::fellowText(const Fellow &fellow)
 {
-    auto text = fellow.getName()+","+fellow.getIp();
+    QString text;
+    const int unread = fellow.getUnreadCount();
+    if (unread > 0)
+        text += QString("[%1]").arg(unread);
+    text += QString::fromStdString(fellow.getName());
+    text += ",";
+    text += QString::fromStdString(fellow.getIp());
     if (!fellow.isOnLine())
-    {
         text = "[离线]"+text;
-    }
-    return QString(text.c_str());
+    const QString typing = QString::fromStdString(fellow.getTyping());
+    if (!typing.isEmpty())
+        text += "（"+typing+" 正在输入...）";
+    return text;
 }
 
 QListWidgetItem *FellowListWidget::findFirstItem(const Fellow &fellow)

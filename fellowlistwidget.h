@@ -21,6 +21,8 @@ public:
     void top(const Fellow& fellow);
     void topSecond(const Fellow& fellow);
     void mark(const Fellow& fellow, const QString &info);
+    void remove(const Fellow& fellow);
+    void removeRemote();
     void setRankPredict(RankPredict predict);
 
 signals:

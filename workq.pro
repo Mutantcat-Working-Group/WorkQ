@@ -4,7 +4,7 @@
 #
 #-------------------------------------------------
 
-QT       += core gui network widgets
+QT       += core gui network websockets widgets
 
 CONFIG   += c++17
 
@@ -43,6 +43,8 @@ SOURCES += main.cpp\
     platformdepend.cpp \
     chooseemojiwidget.cpp \
     sendtextedit.cpp \
+    serverengine.cpp \
+    serversettingsdialog.cpp \
     feiqwin.cpp \
     plugin/iplugin.cpp \
     plugin/rankuser.cpp \
@@ -80,6 +82,8 @@ HEADERS  += mainwindow.h \
     platformdepend.h \
     chooseemojiwidget.h \
     sendtextedit.h \
+    serverengine.h \
+    serversettingsdialog.h \
     plugin/iplugin.h \
     feiqwin.h \
     plugin/rankuser.h \

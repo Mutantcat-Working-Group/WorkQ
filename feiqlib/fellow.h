@@ -16,6 +16,13 @@ public:
     string getMac() const{lock_guard<mutex> lock(mMutex); return mMac;}
     bool isOnLine() const{lock_guard<mutex> lock(mMutex); return mOnLine;}
     string version() const{lock_guard<mutex> lock(mMutex); return mVersion;}
+    string getServerId() const{lock_guard<mutex> lock(mMutex); return mServerId;}
+    string getServerHost() const{lock_guard<mutex> lock(mMutex); return mServerHost;}
+    string getServerUsername() const{lock_guard<mutex> lock(mMutex); return mServerUsername;}
+    long getServerUserId() const{lock_guard<mutex> lock(mMutex); return mServerUserId;}
+    int getUnreadCount() const{lock_guard<mutex> lock(mMutex); return mUnreadCount;}
+    string getTyping() const{lock_guard<mutex> lock(mMutex); return mTyping;}
+    bool isRemote() const{lock_guard<mutex> lock(mMutex); return !mServerId.empty();}
 
     void setIp(const string& value){
         lock_guard<mutex> lock(mMutex);
@@ -45,6 +52,36 @@ public:
     void setVersion(const string& value){
         lock_guard<mutex> lock(mMutex);
         mVersion = value;
+    }
+
+    void setServerId(const string& value){
+        lock_guard<mutex> lock(mMutex);
+        mServerId = value;
+    }
+
+    void setServerHost(const string& value){
+        lock_guard<mutex> lock(mMutex);
+        mServerHost = value;
+    }
+
+    void setServerUsername(const string& value){
+        lock_guard<mutex> lock(mMutex);
+        mServerUsername = value;
+    }
+
+    void setServerUserId(long value){
+        lock_guard<mutex> lock(mMutex);
+        mServerUserId = value;
+    }
+
+    void setUnreadCount(int value){
+        lock_guard<mutex> lock(mMutex);
+        mUnreadCount = value;
+    }
+
+    void setTyping(const string& value){
+        lock_guard<mutex> lock(mMutex);
+        mTyping = value;
     }
 
     void setPcName(const string& value){
@@ -78,6 +115,36 @@ public:
 
         if (mOnLine != fellow.mOnLine){
             mOnLine = fellow.mOnLine;
+            changed=true;
+        }
+
+        if (!fellow.mServerId.empty() && mServerId != fellow.mServerId){
+            mServerId = fellow.mServerId;
+            changed=true;
+        }
+
+        if (!fellow.mServerHost.empty() && mServerHost != fellow.mServerHost){
+            mServerHost = fellow.mServerHost;
+            changed=true;
+        }
+
+        if (!fellow.mServerUsername.empty() && mServerUsername != fellow.mServerUsername){
+            mServerUsername = fellow.mServerUsername;
+            changed=true;
+        }
+
+        if (fellow.mServerUserId != 0 && mServerUserId != fellow.mServerUserId){
+            mServerUserId = fellow.mServerUserId;
+            changed=true;
+        }
+
+        if (mUnreadCount != fellow.mUnreadCount){
+            mUnreadCount = fellow.mUnreadCount;
+            changed=true;
+        }
+
+        if (mTyping != fellow.mTyping){
+            mTyping = fellow.mTyping;
             changed=true;
         }
 
@@ -115,6 +182,7 @@ public:
         <<",mac="<<mMac
         <<",online="<<mOnLine
         <<",version="<<mVersion
+        <<",server="<<mServerId
         <<"]";
         return os.str();
     }
@@ -127,6 +195,12 @@ private:
     string mMac;
     bool mOnLine = false;
     string mVersion;
+    string mServerId;
+    string mServerHost;
+    string mServerUsername;
+    long mServerUserId = 0;
+    int mUnreadCount = 0;
+    string mTyping;
     mutable mutex mMutex;
 };
 

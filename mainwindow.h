@@ -12,6 +12,10 @@
 #include "chooseemojidlg.h"
 #include <QFileInfo>
 #include "sendtextedit.h"
+#include "serverengine.h"
+#include "serversettingsdialog.h"
+#include <QList>
+#include <QLabel>
 
 using namespace std;
 
@@ -76,6 +80,8 @@ private slots:
     void sendFile();
     void sendFile(string filepath);
     void sendFiles(QList<QFileInfo> files);
+    void loadMoreHistory();
+    void disconnectServer();
 
 private:
     void userAddFellow(QString ip);
@@ -84,6 +90,7 @@ private:
     void showResult(pair<bool, string> ret, const Content *content);
     vector<const Fellow*> fellowSearchDriver(const QString& text);
     void initFeiq();
+    void initServer();
     void readEvent(const ViewEvent* event);
     void setBadgeNumber(int number);
     QString simpleTextOf(const Content* content);
@@ -103,6 +110,7 @@ public:
     // IFeiqView interface
 public:
     void onEvent(shared_ptr<ViewEvent> event);
+    void onServerStateChanged(ServerEngine::State state, const QString &detail);
 
 private:
     Ui::MainWindow *ui;
@@ -112,6 +120,9 @@ private:
     ChooseEmojiDlg* mChooseEmojiDlg;
     Settings* mSettings;
     FeiqEngine mFeiq;
+    ServerEngine mServer;
+    QList<const Fellow*> mServerSearchResult;
+    QString mPendingServerAddUser;
     RecvTextEdit* mRecvTextEdit;
     SendTextEdit* mSendTextEdit;
     QString mTitle;

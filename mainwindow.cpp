@@ -81,6 +81,13 @@ MainWindow::MainWindow(QWidget *parent) :
         connect(mSendTextEdit, SIGNAL(ctrlEnterPressed()), this, SLOT(sendText()));
         connect(mSendTextEdit, SIGNAL(enterPressed()), mSendTextEdit, SLOT(newLine()));
     }
+    connect(mSendTextEdit, &QTextEdit::textChanged, this, [this]() {
+        if (mSendTextEdit->toPlainText().isEmpty())
+            return;
+        const Fellow *fellow = mRecvTextEdit->curFellow();
+        if (fellow && fellow->isRemote())
+            mServer.sendTyping(fellow);
+    });
 
     //初始化Emoji对话框
     mChooseEmojiDlg = new ChooseEmojiDlg(this);
@@ -94,9 +101,78 @@ MainWindow::MainWindow(QWidget *parent) :
     connect(ui->actionSendText, SIGNAL(triggered(bool)), this, SLOT(sendText()));
     connect(ui->actionSendKnock, SIGNAL(triggered(bool)), this, SLOT(sendKnock()));
     connect(ui->actionSendFile, SIGNAL(triggered(bool)), this, SLOT(sendFile()));
+    connect(ui->actionLoadMoreHistory, SIGNAL(triggered(bool)), this, SLOT(loadMoreHistory()));
+    connect(ui->actionConnectServer, SIGNAL(triggered(bool)), this, SLOT(initServer()));
+    connect(ui->actionDisconnectServer, SIGNAL(triggered(bool)), this, SLOT(disconnectServer()));
+    connect(&mServer, &ServerEngine::stateChanged,
+            this, &MainWindow::onServerStateChanged);
+    connect(&mServer, &ServerEngine::usersSearched,
+            this, [this](QList<const Fellow*> users) {
+        mServerSearchResult = users;
+        if (mPendingServerAddUser.isEmpty())
+            return;
+
+        const QString wanted = mPendingServerAddUser;
+        mPendingServerAddUser.clear();
+        const Fellow *match = nullptr;
+        for (const Fellow *user : users)
+        {
+            const QString name = QString::fromStdString(user->getName());
+            const QString username = QString::fromStdString(user->getServerUsername());
+            if (name.compare(wanted, Qt::CaseInsensitive) == 0
+                || username.compare(wanted, Qt::CaseInsensitive) == 0)
+            {
+                match = user;
+                break;
+            }
+        }
+        if (!match && !users.isEmpty())
+            match = users.first();
+
+        if (match)
+        {
+            mServer.openDirectChannel(match->getServerUserId(),
+                                      QString::fromStdString(match->getName()),
+                                      QString::fromStdString(match->getServerUsername()));
+        }
+        else
+        {
+            mRecvTextEdit->addWarning(QString("服务器上找不到用户：%1").arg(wanted));
+        }
+    });
+    connect(&mServer, &ServerEngine::directChannelOpened,
+            this, [this](const Fellow *fellow, bool ok, const QString &error) {
+        if (!ok)
+        {
+            mRecvTextEdit->addWarning(error);
+            return;
+        }
+        mFellowList.update(*fellow);
+        mFellowList.top(*fellow);
+        openChartTo(fellow);
+    });
+    connect(&mServer, &ServerEngine::loadMoreDone,
+            this, [this](bool ok, const QString &error) {
+        if (!ok)
+            mRecvTextEdit->addWarning(error);
+    });
+    connect(&mServer, &ServerEngine::channelsCleared,
+            this, [this]() {
+        mFellowList.removeRemote();
+        mPendingServerAddUser.clear();
+    });
+    connect(&mServer, &ServerEngine::channelRemoved,
+            this, [this](const Fellow *fellow) {
+        if (fellow)
+            mFellowList.remove(*fellow);
+    });
 
     //初始化平台相关特性
     PlatformDepend::instance().setMainWnd(this);
+    mServerStatusLabel = new QLabel(statusBar());
+    statusBar()->addWidget(mServerStatusLabel);
+    mServerStatusLabel->setText("服务器未连接");
+    mServerStatusLabel->setStyleSheet("color: gray;");
 
     //初始化我Q引擎
     connect(this, SIGNAL(feiqViewEvent(shared_ptr<ViewEvent>)), this, SLOT(handleFeiqViewEvent(shared_ptr<ViewEvent>)));
@@ -109,6 +185,7 @@ MainWindow::~MainWindow()
 {
     if (mFeiqWin)
         mFeiqWin->unInit();
+    mServer.stop();
     mFeiq.stop();
     mSettings->sync();
     delete mSettings;
@@ -127,7 +204,11 @@ void MainWindow::setFeiqWin(FeiqWin *feiqWin)
 void MainWindow::onNotifyClicked(const QString& fellowIp)
 {
     qDebug()<<fellowIp;
-    auto fellow = mFeiq.getModel().findFirstFellowOf(fellowIp.toStdString());
+    shared_ptr<Fellow> fellow;
+    if (fellowIp.startsWith("server://"))
+        fellow = mServer.getShared(mServer.findChannelFellow(fellowIp));
+    else
+        fellow = mFeiq.getModel().findFirstFellowOf(fellowIp.toStdString());
     if (fellow)
         openChartTo(fellow.get());
 
@@ -138,14 +219,21 @@ void MainWindow::onNotifyClicked(const QString& fellowIp)
 
 void MainWindow::onNotifyReplied(long notifyId, const QString &fellowIp, const QString &reply)
 {
-    auto fellow = mFeiq.getModel().findFirstFellowOf(fellowIp.toStdString());
+    shared_ptr<Fellow> fellow;
+    if (fellowIp.startsWith("server://"))
+        fellow = mServer.getShared(mServer.findChannelFellow(fellowIp));
+    else
+        fellow = mFeiq.getModel().findFirstFellowOf(fellowIp.toStdString());
     if (fellow)
     {
         //回复消息
         auto content = make_shared<TextContent>();
         content->text = reply.toStdString();
 
-        mFeiq.send(fellow, content);
+        if (fellow->isRemote())
+            mServer.sendText(fellow.get(), reply);
+        else
+            mFeiq.send(fellow, content);
 
         //设为已回复
         auto msgRepliedTo = findUnshownMessage(notifyId);
@@ -188,11 +276,16 @@ void MainWindow::openChartTo(const Fellow *fellow)
     setWindowTitle(mTitle + " - 与"+fellow->getName().c_str()+"会话中");
     flushUnshown(fellow);
     updateUnshownHint(fellow);
+    if (fellow->isRemote())
+        mServer.openChannel(fellow);
 }
 
 shared_ptr<Fellow> MainWindow::checkCurFellow()
 {
-    auto fellow = mFeiq.getModel().getShared(mRecvTextEdit->curFellow());
+    const Fellow *current = mRecvTextEdit->curFellow();
+    auto fellow = current && current->isRemote()
+        ? mServer.getShared(current)
+        : mFeiq.getModel().getShared(current);
     if (fellow == nullptr)
     {
         mRecvTextEdit->addWarning("这是要发给谁？");
@@ -309,16 +402,47 @@ void MainWindow::handleFeiqViewEvent(shared_ptr<ViewEvent> event)
 
 void MainWindow::refreshFellowList()
 {
+    if (mServer.isConnected())
+    {
+        mServer.reloadChannels();
+        return;
+    }
     mFeiq.sendImOnLine();
 }
 
 void MainWindow::addFellow()
 {
     AddFellowDialog dlg(this);
+    dlg.setServerMode(mServer.isConfigured());
     if (dlg.exec() == QDialog::Accepted)
     {
-        auto ip = dlg.getIp();
-        userAddFellow(ip);
+        auto ip = dlg.getIp().trimmed();
+        if (mServer.isConfigured())
+        {
+            if (!mServer.isConnected())
+            {
+                mRecvTextEdit->addWarning("服务器尚未连接，请先连接远程服务器");
+                return;
+            }
+
+            // 服务器模式按用户名添加并打开私聊
+            const auto users = mServer.searchFellowByName(ip);
+            if (!users.empty())
+            {
+                const Fellow *user = users.front();
+                mServer.openDirectChannel(user->getServerUserId(),
+                                          QString::fromStdString(user->getName()),
+                                          QString::fromStdString(user->getServerUsername()));
+                return;
+            }
+
+            mPendingServerAddUser = ip;
+            mServer.searchUsers(ip);
+        }
+        else
+        {
+            userAddFellow(ip);
+        }
     }
 }
 
@@ -425,6 +549,11 @@ void MainWindow::sendFile(std::string filepath)
     else
     {
         auto fileContent = shared_ptr<FileContent>(std::move(content));
+        if (fellow->isRemote())
+        {
+            mRecvTextEdit->addWarning("服务器模式暂不支持文件传输，请切换局域网模式");
+            return;
+        }
         auto ret = mFeiq.send(fellow, fileContent);
         showResult(ret, fileContent.get());
     }
@@ -457,7 +586,16 @@ void MainWindow::sendKnock()
     if (fellow)
     {
         auto content = make_shared<KnockContent>();
-        auto ret = mFeiq.send(fellow, content);
+        pair<bool, string> ret;
+        if (fellow->isRemote())
+        {
+            const auto serverRet = mServer.sendKnock(fellow.get());
+            ret = make_pair(serverRet.first, serverRet.second.toStdString());
+        }
+        else
+        {
+            ret = mFeiq.send(fellow, content);
+        }
         showResult(ret, content.get());
     }
 }
@@ -477,7 +615,16 @@ void MainWindow::sendText()
     {
         auto content = make_shared<TextContent>();
         content->text = text.toStdString();
-        auto ret = mFeiq.send(fellow, content);
+        pair<bool, string> ret;
+        if (fellow->isRemote())
+        {
+            const auto serverRet = mServer.sendText(fellow.get(), text);
+            ret = make_pair(serverRet.first, serverRet.second.toStdString());
+        }
+        else
+        {
+            ret = mFeiq.send(fellow, content);
+        }
         showResult(ret, content.get());
         mSendTextEdit->clear();
     }
@@ -485,14 +632,26 @@ void MainWindow::sendText()
 
 void MainWindow::finishSearch(const Fellow *fellow)
 {
+    if (fellow && fellow->isRemote())
+    {
+        const long remoteUserId = fellow->getServerUserId();
+        if (remoteUserId > 0)
+        {
+            mServer.openDirectChannel(remoteUserId,
+                                      QString::fromStdString(fellow->getName()),
+                                      QString::fromStdString(fellow->getServerUsername()));
+            return;
+        }
+    }
     mFellowList.top(*fellow);
     openChartTo(fellow);
 }
 
 void MainWindow::openSettings()
 {
-    QMessageBox::information(this, "设置", "设置文件在:"+mSettings->fileName()+"\n重启后生效",
-                             QMessageBox::Ok);
+    ServerSettingsDialog dlg(mSettings, &mServer, this);
+    connect(&dlg, &QDialog::accepted, this, &MainWindow::initServer);
+    dlg.exec();
 }
 
 void MainWindow::openSearchDlg()
@@ -506,6 +665,68 @@ void MainWindow::openDownloadDlg()
     mDownloadFileDlg->raise();
 }
 
+void MainWindow::initServer()
+{
+    mServer.setView(this);
+    const bool enabled = mSettings->value("server/enabled", false).toBool();
+    if (enabled)
+    {
+        mServer.start(mSettings->value("server/url").toString(),
+                      mSettings->value("server/username").toString(),
+                      mSettings->value("server/password").toString());
+    }
+    else
+    {
+        mServer.stop();
+        onServerStateChanged(ServerEngine::State::Disconnected, "服务器未启用");
+    }
+}
+
+void MainWindow::disconnectServer()
+{
+    mServer.stop();
+    onServerStateChanged(ServerEngine::State::Disconnected, "已断开服务器");
+}
+
+void MainWindow::onServerStateChanged(ServerEngine::State state, const QString &detail)
+{
+    if (!mServerStatusLabel)
+        return;
+
+    switch (state)
+    {
+    case ServerEngine::State::Connecting:
+        mServerStatusLabel->setText("正在连接服务器...");
+        mServerStatusLabel->setStyleSheet("color: #b45309;");
+        ui->actionConnectServer->setEnabled(false);
+        ui->actionDisconnectServer->setEnabled(true);
+        break;
+    case ServerEngine::State::Connected:
+        mServerStatusLabel->setText("已连接服务器");
+        mServerStatusLabel->setStyleSheet("color: #15803d;");
+        ui->actionConnectServer->setEnabled(false);
+        ui->actionDisconnectServer->setEnabled(true);
+        break;
+    case ServerEngine::State::Disconnected:
+        mServerStatusLabel->setText("服务器未连接" + (detail.isEmpty() ? QString() : "：" + detail));
+        mServerStatusLabel->setStyleSheet("color: #b91c1c;");
+        ui->actionConnectServer->setEnabled(true);
+        ui->actionDisconnectServer->setEnabled(false);
+        break;
+    }
+}
+
+void MainWindow::loadMoreHistory()
+{
+    auto fellow = checkCurFellow();
+    if (!fellow)
+        return;
+    if (fellow->isRemote())
+        mServer.loadMoreHistory(fellow.get());
+    else
+        mRecvTextEdit->addWarning("局域网模式没有更多历史消息");
+}
+
 vector<const Fellow *> MainWindow::fellowSearchDriver(const QString &text)
 {
     auto fellows = mFeiq.getModel().searchFellow(text.toStdString());
@@ -513,6 +734,11 @@ vector<const Fellow *> MainWindow::fellowSearchDriver(const QString &text)
     for (auto fellow : fellows)
     {
         result.push_back(fellow.get());
+    }
+    if (mServer.isConnected())
+    {
+        const auto serverFellows = mServer.searchChannels(text);
+        result.insert(result.end(), serverFellows.begin(), serverFellows.end());
     }
     return result;
 }
@@ -523,8 +749,9 @@ void MainWindow::initFeiq()
     auto name = mSettings->value("user/name").toString();
     if (name.isEmpty())
     {
-        emit showErrorAndQuit("请先打开【"+mSettings->fileName()+"】设置用户名(user/name)");
-        return;
+        if (!mSettings->value("server/enabled", false).toBool())
+            mRecvTextEdit->addWarning("未设置用户名，暂时使用默认名称");
+        name = mSettings->value("server/username", "我Q用户").toString();
     }
 
     mFeiq.setMyName(name.toStdString());
@@ -560,6 +787,7 @@ void MainWindow::initFeiq()
     }
 
     qDebug()<<"WorkQ started";
+    initServer();
 }
 
 void MainWindow::updateUnshownHint(const Fellow *fellow)

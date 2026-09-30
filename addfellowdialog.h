@@ -17,6 +17,7 @@ public:
 
 public:
     QString getIp();
+    void setServerMode(bool serverMode);
 private slots:
     void onOkClicked();
 private:
@@ -24,6 +25,7 @@ private:
 
 private:
     Ui::AddFellowDialog *ui;
+    bool mServerMode = false;
 };
 
 #endif // ADDFELLOWDIALOG_H
