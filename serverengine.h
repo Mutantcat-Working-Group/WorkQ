@@ -108,10 +108,11 @@ private:
     void sendRecord(const QByteArray &payload);
     void invoke(const QString &target, const QJsonArray &args);
     void handleFrame(const QJsonObject &frame);
-    void handleReceiveMessage(const QJsonObject &args);
-    void handleMessageSent(const QJsonObject &args);
-    void handleTyping(const QJsonObject &args);
-    void handlePresence(const QJsonObject &args);
+    void handleReceiveMessage(const QJsonArray &args);
+    void handleMessageSent(const QJsonArray &args);
+    void handleTyping(const QJsonArray &args);
+    void handlePresence(const QJsonArray &args);
+    void scheduleReconnect();
     void dispatch(shared_ptr<ViewEvent> event);
     void updateChannel(const QString &channelId);
     void updateAllChannels();

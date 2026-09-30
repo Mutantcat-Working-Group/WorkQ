@@ -767,9 +767,9 @@ void ServerEngine::openDirectChannel(long remoteUserId, const QString &displayNa
 
     QJsonObject body;
     body.insert("kind", "Direct");
-    body.insert("memberIds", QJsonArray{ remoteUserId });
+    body.insert("memberIds", QJsonArray{ QJsonValue(static_cast<qint64>(remoteUserId)) });
     auto reply = mHttp.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, displayName, username]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, remoteUserId, displayName, username]() {
         reply->deleteLater();
         if (mExpectStop || mToken.isEmpty())
         {

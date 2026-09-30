@@ -169,7 +169,7 @@ MainWindow::MainWindow(QWidget *parent) :
 
     //初始化平台相关特性
     PlatformDepend::instance().setMainWnd(this);
-    mServerStatusLabel = new QLabel(statusBar());
+    mServerStatusLabel = new QLabel(this);
     statusBar()->addWidget(mServerStatusLabel);
     mServerStatusLabel->setText("服务器未连接");
     mServerStatusLabel->setStyleSheet("color: gray;");

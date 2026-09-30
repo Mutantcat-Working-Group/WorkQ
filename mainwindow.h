@@ -128,6 +128,7 @@ private:
     QString mTitle;
     unordered_map<const Fellow*, list<UnshownMessage>> mUnshownEvents;
     FeiqWin* mFeiqWin = nullptr;
+    QLabel *mServerStatusLabel = nullptr;
 };
 
 #endif // MAINWINDOW_H
