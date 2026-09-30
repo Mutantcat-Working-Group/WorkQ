@@ -1,4 +1,5 @@
 #include "utils.h"
+#include <cstring>
 
 vector<string> splitAllowSeperator(vector<char>::iterator from, vector<char>::iterator to, char sep)
 {

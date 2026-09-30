@@ -476,9 +476,9 @@ public:
 }
 
 //添加一条发送协议
-#define ADD_SEND_PROTOCOL(protocol, sender, args...)\
+#define ADD_SEND_PROTOCOL(protocol, sender, ...)\
 {\
-    mContentSender[protocol]=make_shared<sender>(##args);\
+    mContentSender[protocol]=make_shared<sender>(__VA_ARGS__);\
 }
 
 FeiqEngine::FeiqEngine()

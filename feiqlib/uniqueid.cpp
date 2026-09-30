@@ -1,5 +1,5 @@
 #include "uniqueid.h"
-#include <limits.h>
+#include <climits>
 
 UniqueId::UniqueId()
 {
@@ -9,7 +9,7 @@ UniqueId::UniqueId()
 IdType UniqueId::get()
 {
     auto id = ++mId;
-    if (id >= ULONG_LONG_MAX)
+    if (id >= ULLONG_MAX)
         mId=1;
 
     return mId;
