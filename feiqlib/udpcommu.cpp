@@ -1,3 +1,10 @@
+#ifdef _WIN32
+#include <winsock2.h>
+#endif
+#ifndef _WIN32
+#include <sys/socket.h>
+#endif
+
 #include "udpcommu.h"
 #include <QUdpSocket>
 #include <QHostAddress>
@@ -23,12 +30,20 @@ bool UdpCommu::bindTo(int port)
         setFailedMsgAndReturnFalse("已经初始化");
 
     auto socket = new QUdpSocket();
-    socket->setSocketOption(QAbstractSocket::BroadcastSocketOption, 1);
     auto ret = socket->bind(QHostAddress::AnyIPv4, static_cast<quint16>(port),
                             QAbstractSocket::ShareAddress | QAbstractSocket::ReuseAddressHint);
     if (!ret)
     {
         mErrMsg = socket->errorString().toStdString();
+        delete socket;
+        return false;
+    }
+
+    int enabled = 1;
+    if (setsockopt(socket->socketDescriptor(), SOL_SOCKET, SO_BROADCAST,
+                   reinterpret_cast<const char*>(&enabled), sizeof(enabled)) != 0)
+    {
+        mErrMsg = "设置广播选项失败";
         delete socket;
         return false;
     }
@@ -139,8 +154,6 @@ void UdpCommu::recvThread()
         {
             if (!mAsyncMode)
                 break;
-            if (socket->error() != QAbstractSocket::NoError)
-                socket->clearError();
             continue;
         }
 
@@ -157,8 +170,6 @@ void UdpCommu::recvThread()
             auto size = socket->readDatagram(buf.data(), pendingSize, &addr, &port);
             if (size < 0)
             {
-                if (mAsyncMode)
-                    socket->clearError();
                 break;
             }
 
