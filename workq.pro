@@ -16,6 +16,8 @@ lessThan(QT_MAJOR_VERSION, 6): error("WorkQ 需要 Qt 6 或更高版本")
 # 统一图标源为根目录 icon.png；CI 会由它生成 res/workq.ico 和 icon.icns
 win32: RC_ICONS = res/workq.ico
 macx: ICON = icon.icns
+win32: LIBS += -lws2_32
+macx: LIBS += -liconv
 
 SOURCES += main.cpp\
         mainwindow.cpp \

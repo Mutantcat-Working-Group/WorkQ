@@ -42,13 +42,18 @@ jobs:
           LDAI_OUTPUT: WorkQ-${{ env.VERSION }}-linux-x86_64.AppImage
         run: |
           set -euxo pipefail
+          python3 -m pip install --disable-pip-version-check -q Pillow
+          python3 - <<'PY'
+          from PIL import Image
+          Image.open("icon.png").resize((512, 512), Image.LANCZOS).save("icon-512.png", format="PNG")
+          PY
           cd build
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
           chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
           ./linuxdeploy-x86_64.AppImage --appdir AppDir --executable WorkQ \
             --desktop-file ../packaging/linux/WorkQ.desktop \
-            --icon-file ../icon.png \
+            --icon-file ../icon-512.png \
             --plugin qt \
             --output appimage
 
