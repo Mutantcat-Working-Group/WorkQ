@@ -636,7 +636,7 @@ bool FeiqEngine::downloadFile(FileTask* task)
         sharedTask->setState(FileTaskState::Finish);
     };
 
-    trackThread(std::thread(func));
+    trackThread(std::thread(std::move(func)));
     return true;
 }
 
