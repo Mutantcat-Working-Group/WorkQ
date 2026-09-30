@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QDebug>
 #include <QMessageBox>
+#include <QStatusBar>
 #include <QFileDialog>
 #include <QDateTime>
 #include <QThread>
