@@ -5,10 +5,12 @@
 #include "utils.h"
 #include <fstream>
 #include "defer.h"
-#include <arpa/inet.h>
-#include <unistd.h>
 #include <iostream>
 #include <iomanip>
+#include <thread>
+#include <chrono>
+#include <QFile>
+#include <QString>
 
 class ContentSender : public SendProtocol
 {
@@ -325,7 +327,10 @@ public:
         //文件名含:，以::表示
         auto& extra = post->extra;
         auto end = extra.end();
-        auto found = find(extra.begin(), end, 0)+1;
+        auto found = find(extra.begin(), end, 0);
+        if (found == end)
+            return false;
+        ++found;
 
         while (found != end)
         {
@@ -336,7 +341,7 @@ public:
             auto content = createFileContent(found, endTask);
             if (content != nullptr)
             {
-                content->packetNo = stoul(post->packetNo);
+                content->packetNo = safeParse<IdType>(post->packetNo, 0);
                 post->contents.push_back(shared_ptr<Content>(std::move(content)));
             }
 
@@ -356,11 +361,11 @@ private:
         if (values.size() < fieldCount)
             return nullptr;
 
-        content->fileId = stoi(values[0]);
+        content->fileId = safeParse<IdType>(values[0], 0);
         content->filename = encIn->convert(values[1]);
-        content->size = stoi(values[2],0,16);
-        content->modifyTime = stoi(values[3],0,16);
-        content->fileType = stoi(values[4],0,16);
+        content->size = safeParse<long long>(values[2],0,16);
+        content->modifyTime = safeParse<long long>(values[3],0,16);
+        content->fileType = safeParse<int>(values[4],0,16);
 
         return content;
     }
@@ -396,7 +401,7 @@ public:
     {
         if (post->cmdId == IPMSG_RECVMSG)
         {
-            IdType id = static_cast<IdType>(stoll(toString(post->extra)));
+            IdType id = static_cast<IdType>(safeParse<long long>(toString(post->extra), 0));
             auto content = make_shared<IdContent>();
             content->id = id;
             post->addContent(content);
@@ -415,6 +420,9 @@ public:
         if (IS_CMD_SET(post->cmdId, IPMSG_SENDIMAGE)
             && IS_OPT_SET(post->cmdId, IPMSG_FILEATTACHOPT))
         {
+            if (post->extra.size() < 8)
+                return false;
+
             char id[9]={0};
             memcpy(id, post->extra.data(), 8);
             auto content = make_shared<ImageContent>();
@@ -501,11 +509,19 @@ FeiqEngine::FeiqEngine()
                                           placeholders::_4));
 }
 
+FeiqEngine::~FeiqEngine()
+{
+    stop();
+}
+
 pair<bool, string> FeiqEngine::send(shared_ptr<Fellow> fellow, shared_ptr<Content> content)
 {
     if (content == nullptr)
         return {false, "要发送的内容无效"};
+    if (fellow == nullptr)
+        return {false, "发送对象无效"};
 
+    lock_guard<mutex> lock(mSendMutex);
     auto& sender = mContentSender[content->type()];
     if (sender == nullptr)
         return {false, "no send protocol can send"};
@@ -522,7 +538,8 @@ pair<bool, string> FeiqEngine::send(shared_ptr<Fellow> fellow, shared_ptr<Conten
 
     if (content->type() == ContentType::File){
         auto ptr = dynamic_pointer_cast<FileContent>(content);
-        mModel.addUploadTask(fellow, ptr)->setObserver(mView);
+        if (ptr != nullptr)
+            mModel.addUploadTask(fellow, ptr)->setObserver(mView);
     }
     else if (content->type() == ContentType::Text){
         auto handler = std::bind(&FeiqEngine::onSendTimeo, this, placeholders::_1, ip, content);
@@ -546,47 +563,48 @@ bool FeiqEngine::downloadFile(FileTask* task)
     if (task==nullptr)
         return false;
 
-    task->setObserver(mView);
+    auto content = task->getContent();
+    auto fellow = task->fellow();
+    if (content == nullptr || fellow == nullptr)
+        return false;
 
-    auto func = [task, this](){
-        auto fellow = task->fellow();
-        auto content = task->getContent();
+    auto sharedTask = mModel.findTask(content->packetNo,
+                                      content->fileId,
+                                      FileTaskType::Download);
+    if (!sharedTask)
+        sharedTask = mModel.addDownloadTask(fellow, content);
+    sharedTask->setObserver(mView);
 
-        auto client = mCommu.requestFileData(fellow->getIp(), *content, 0);
-        if (client == nullptr)
-        {
-            task->setState(FileTaskState::Error, "请求下载文件失败，可能好友已经取消");
+    auto client = mCommu.requestFileData(fellow->getIp(), *content, 0);
+    if (client == nullptr)
+    {
+        sharedTask->setState(FileTaskState::Error, "请求下载文件失败，可能好友已经取消");
+        return false;
+    }
+
+    auto func = [sharedTask, client = std::move(client)]() mutable {
+        auto content = sharedTask->getContent();
+        QFile of(QString::fromStdString(content->path));
+        if (!of.open(QIODevice::WriteOnly)){
+            sharedTask->setState(FileTaskState::Error, "无法打开文件进行保存");
             return;
         }
-
-        FILE* of = fopen(content->path.c_str(), "w+");
-        if (of == nullptr){
-            task->setState(FileTaskState::Error, "无法打开文件进行保存");
-            return;
-        }
-
-//        Defer{//TODO:工作异常
-//            [of](){
-//                cout<<"close file now"<<endl;
-//                fclose(of);
-//            }
-//        };
 
         const int unitSize = 2048;//一次请求2k
         const int maxTimeoCnt = 3;//最多允许超时3次
         const int timeo = 2000;//允许超时2s
 
-        int recv = 0;
+        long long recv = 0;
         auto total = content->size;
         std::array<char, unitSize> buf;
         int timeoCnt = 0;
-        task->setState(FileTaskState::Running);
+        sharedTask->setState(FileTaskState::Running);
         while (recv < total)
         {
-            if (task->hasCancelPending())
+            if (sharedTask->hasCancelPending())
             {
-                task->setState(FileTaskState::Canceled);
-                fclose(of);
+                sharedTask->setState(FileTaskState::Canceled);
+                of.close();
                 return;
             }
 
@@ -595,33 +613,31 @@ bool FeiqEngine::downloadFile(FileTask* task)
             auto got = client->recv(buf.data(), request, timeo);
             if (got == -1 && ++timeoCnt >= maxTimeoCnt)
             {
-                task->setState(FileTaskState::Error, "下载文件超时，好友可能掉线");
-                fclose(of);
+                sharedTask->setState(FileTaskState::Error, "下载文件超时，好友可能掉线");
+                of.close();
                 return;
             }
-            else if (got < 0)
+            else if (got <= 0)
             {
-                task->setState(FileTaskState::Error, "接收数据出错，可能网络错误");
-                fclose(of);
+                sharedTask->setState(FileTaskState::Error, "接收数据出错，可能网络错误");
+                of.close();
                 return;
             }
             else
             {
-                fwrite(buf.data(), 1, got, of);
+                of.write(buf.data(), got);
                 recv+=got;
-                task->setProcess(recv);
+                sharedTask->setProcess(recv);
             }
         }
 
-        fclose(of);
-        task->setProcess(total);
-        task->setState(FileTaskState::Finish);
+        of.close();
+        sharedTask->setProcess(total);
+        sharedTask->setState(FileTaskState::Finish);
     };
 
-    thread thd(func);
-    thd.detach();
-
-    return task;
+    trackThread(std::thread(func));
+    return true;
 }
 
 class GetPubKey : public SendProtocol
@@ -648,8 +664,8 @@ pair<bool, string> FeiqEngine::start()
     {
         mAsyncWait.start();
 
-        mMsgThd.start();
         mMsgThd.setHandler(std::bind(&FeiqEngine::dispatchMsg, this, placeholders::_1));
+        mMsgThd.start();
 
         mStarted = true;
         sendImOnLine();
@@ -660,16 +676,33 @@ pair<bool, string> FeiqEngine::start()
 
 void FeiqEngine::stop()
 {
-    if (mStarted)
+    bool wasStarted = mStarted.exchange(false);
+
+    //即使引擎从未成功启动，也要回收 enableIntervalDetect 创建的线程
     {
-        mStarted=false;
+        lock_guard<mutex> lock(mIntervalMutex);
+        ++mIntervalGen;
+        mIntervalCv.notify_all();
+    }
+    if (mIntervalThread.joinable())
+        mIntervalThread.join();
+
+    if (wasStarted)
+    {
         SendImOffLine imOffLine(mName);
         mCommu.send("255.255.255.255", imOffLine);
         broadcastToCurstomGroup(imOffLine);
-        mCommu.stop();
-        mAsyncWait.stop();
-        mMsgThd.stop();
     }
+
+    mCommu.stop();
+    mAsyncWait.stop();
+    mMsgThd.stop();
+
+    lock_guard<mutex> lock(mThreadsMutex);
+    for (auto& thd : mFileThreads)
+        if (thd.joinable())
+            thd.join();
+    mFileThreads.clear();
 }
 
 void FeiqEngine::addToBroadcast(const string &ip)
@@ -707,17 +740,36 @@ void FeiqEngine::sendImOnLine(const string &ip)
 
 void FeiqEngine::enableIntervalDetect(int seconds)
 {
-    thread thd([this, seconds](){
-        while(mStarted)
-        {
-            sleep(seconds);
-            if (!mStarted)  break;
+    //把需要周期发送的目标抓下来，后台线程不再访问会被 stop 修改的成员
+    auto name = mName;
+    auto targets = mBroadcast;
 
-            SendImOnLine imOnLine(mName);
-            broadcastToCurstomGroup(imOnLine);
+    //通过代际计数让旧线程立即退出，避免 join 等到下一轮发送
+    {
+        lock_guard<mutex> lock(mIntervalMutex);
+        ++mIntervalGen;
+        mIntervalCv.notify_all();
+    }
+    if (mIntervalThread.joinable())
+        mIntervalThread.join();
+
+    mIntervalThread = std::thread([this, seconds, name, targets](){
+        auto gen = mIntervalGen;
+        while (true)
+        {
+            unique_lock<mutex> lock(mIntervalMutex);
+            mIntervalCv.wait_for(lock, std::chrono::seconds(seconds), [this, gen](){
+                return !mStarted || mIntervalGen != gen;
+            });
+            if (!mStarted || mIntervalGen != gen)
+                break;
+            lock.unlock();
+
+            SendImOnLine imOnLine(name);
+            for (auto ip : targets)
+                mCommu.send(ip, imOnLine);
         }
     });
-    thd.detach();
 }
 
 
@@ -756,7 +808,7 @@ void FeiqEngine::onMsg(shared_ptr<Post> post)
             else if (fc->fileType == IPMSG_FILE_DIR)
             {
                 rejected=true;
-                reply+="Mac飞秋还不支持接收目录："+fc->filename+"\n";
+                reply+="我Q还不支持接收目录："+fc->filename+"\n";
             }
         }
         else if ((*it)->type() == ContentType::Text)
@@ -775,7 +827,7 @@ void FeiqEngine::onMsg(shared_ptr<Post> post)
             auto ic = static_cast<ImageContent*>((*it).get());
             if (std::find(rejectedImages.begin(), rejectedImages.end(), ic->id)==rejectedImages.end())
             {
-                reply+="Mac飞秋还不支持接收图片，请用文件形式发送图片\n";
+                reply+="我Q还不支持接收图片，请用文件形式发送图片\n";
                 rejectedImages.push_back(ic->id);
             }
             rejected=true;
@@ -829,47 +881,50 @@ void FeiqEngine::onReadMessage(shared_ptr<Post> post)
     if (post->contents.empty())
         return;
     auto content = dynamic_pointer_cast<IdContent>(post->contents[0]);
+    if (content == nullptr)
+        return;
     mAsyncWait.clearWaitPack(content->id);
 }
 
 void FeiqEngine::fileServerHandler(unique_ptr<TcpSocket> client, int packetNo, int fileId, int offset)
 {
     auto task = mModel.findTask(packetNo, fileId);
-    if (task == nullptr)
+    if (task == nullptr || task->getContent() == nullptr)
         return;
 
     auto func = [task, offset](unique_ptr<TcpSocket> client){
-        FILE* is = fopen(task->getContent()->path.c_str(), "r");
-        if (is == nullptr)
+        QFile is(QString::fromStdString(task->getContent()->path));
+        if (!is.open(QIODevice::ReadOnly))
         {
             task->setState(FileTaskState::Error, "无法读取文件");
+            return;
         }
 
-//        Defer{
-//            [is](){
-//                fclose(is);
-//            }
-//        };
-
         if (offset > 0)
-            fseek(is, offset, SEEK_SET);
+            is.seek(offset);
 
         const int unitSize = 2048;//一次发送2k
         std::array<char, unitSize> buf;
         auto total = task->getContent()->size;
-        int sent = 0;
+        long long sent = 0;
 
         task->setState(FileTaskState::Running);
-        while (sent < total && !feof(is))
+        while (sent < total && !is.atEnd())
         {
             auto left = total - sent;
             auto request = unitSize > left ? left : unitSize;
-            int got = fread(buf.data(), 1, request, is);
+            int got = is.read(buf.data(), request);
+            if (got <= 0)
+            {
+                task->setState(FileTaskState::Error, "读取文件出错");
+                is.close();
+                return;
+            }
             got = client->send(buf.data(), got);
             if (got < 0)
             {
                 task->setState(FileTaskState::Error, "无法发送数据，可能是网络问题");
-                fclose(is);
+                is.close();
                 return;
             }
 
@@ -887,11 +942,16 @@ void FeiqEngine::fileServerHandler(unique_ptr<TcpSocket> client, int packetNo, i
             task->setState(FileTaskState::Finish);
         }
 
-        fclose(is);
+        is.close();
     };
 
-    thread thd(func, std::move(client));
-    thd.detach();
+    trackThread(std::thread(func, std::move(client)));
+}
+
+void FeiqEngine::trackThread(std::thread thd)
+{
+    lock_guard<mutex> lock(mThreadsMutex);
+    mFileThreads.push_back(std::move(thd));
 }
 
 shared_ptr<Fellow> FeiqEngine::addOrUpdateFellow(shared_ptr<Fellow> fellow)
@@ -924,7 +984,8 @@ shared_ptr<Fellow> FeiqEngine::addOrUpdateFellow(shared_ptr<Fellow> fellow)
 
 void FeiqEngine::dispatchMsg(shared_ptr<ViewEvent> msg)
 {
-    mView->onEvent(msg);
+    if (mView)
+        mView->onEvent(msg);
 }
 
 void FeiqEngine::broadcastToCurstomGroup(SendProtocol &protocol)

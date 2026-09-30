@@ -34,7 +34,7 @@ private:
 
 private:
     friend class MainWindow;
-    MainWindow* mMainWin;
+    MainWindow* mMainWin = nullptr;
     QList<IPlugin*> mPlugins;
 };
 

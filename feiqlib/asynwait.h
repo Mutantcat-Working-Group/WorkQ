@@ -7,6 +7,7 @@
 #include <mutex>
 #include <chrono>
 #include <thread>
+#include <atomic>
 
 using namespace std;
 using namespace std::chrono;
@@ -34,7 +35,7 @@ private:
 
     list<WaitPack> mWaitPacks;
     mutex mPacksMutex;
-    bool mStarted=false;
+    atomic<bool> mStarted{false};
     int mPrecision;
     thread mThd;
 };

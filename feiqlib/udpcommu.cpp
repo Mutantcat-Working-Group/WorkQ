@@ -1,79 +1,59 @@
 #include "udpcommu.h"
-#include <string.h>
-#include <errno.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <arpa/inet.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <thread>
-#include <net/if.h>
-#include <sys/ioctl.h>
-#include <netinet/in.h>
-#include <net/if_dl.h>
-#include <sys/sysctl.h>
+#include <QUdpSocket>
+#include <QHostAddress>
+#include <QNetworkInterface>
+#include <QString>
 #include <array>
+#include <mutex>
 
 #define setFailedMsgAndReturnFalse(msg) \
     {mErrMsg = msg;\
     return false;}
 
-#define setErrnoMsgAndReturnFalse()\
-    {mErrMsg = strerror(errno);\
-    return false;}
-
-#define setErrnoMsg()   mErrMsg = strerror(errno);
-
 UdpCommu::UdpCommu(){}
+
+UdpCommu::~UdpCommu()
+{
+    close();
+}
 
 bool UdpCommu::bindTo(int port)
 {
-    if (mSocket != -1)
+    if (mSocket.load(std::memory_order_relaxed) != nullptr)
         setFailedMsgAndReturnFalse("已经初始化");
 
-    //创建socket
-    mSocket = socket(PF_INET, SOCK_DGRAM, 0);
-    if (mSocket == -1)
-        setErrnoMsgAndReturnFalse();
+    auto socket = new QUdpSocket();
+    socket->setSocketOption(QAbstractSocket::BroadcastSocketOption, 1);
+    auto ret = socket->bind(QHostAddress::AnyIPv4, static_cast<quint16>(port),
+                            QAbstractSocket::ShareAddress | QAbstractSocket::ReuseAddressHint);
+    if (!ret)
+    {
+        mErrMsg = socket->errorString().toStdString();
+        delete socket;
+        return false;
+    }
 
-    auto ret = -1;
-    //允许广播
-    auto broadcast = 1;
-    ret = setsockopt(mSocket, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(int));
-    if (ret == -1)
-        setErrnoMsgAndReturnFalse();
-
-    //地址复用
-    auto reuse = 1;
-    ret = setsockopt(mSocket, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(int));
-    if (ret == -1)
-        setErrnoMsgAndReturnFalse();
-
-    //绑定
-    sockaddr_in addr;
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons(port);
-
-    ret = ::bind(mSocket, (sockaddr*)&addr, sizeof(addr));
-    if (ret == -1)
-        setErrnoMsgAndReturnFalse();
-
+    mSocket.store(socket, std::memory_order_release);
     return true;
 }
 
 int UdpCommu::sentTo(const string& ip, int port, const void *data, int size)
 {
-    sockaddr_in addr;
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = inet_addr(ip.c_str());
-    addr.sin_port = htons(port);
+    auto socket = mSocket.load(std::memory_order_acquire);
+    if (socket == nullptr)
+    {
+        mErrMsg = "请先初始化socket";
+        return -1;
+    }
 
-    auto ret = ::sendto(mSocket, data, size, 0, (sockaddr*)&addr, sizeof(addr));
-    if (ret == -1)
-        setErrnoMsg();
+    lock_guard<mutex> lock(mSendMutex);
+    auto ret = socket->writeDatagram(static_cast<const char*>(data), size,
+                                     QHostAddress(QString::fromStdString(ip)),
+                                     static_cast<quint16>(port));
+    if (ret < 0)
+        mErrMsg = socket->errorString().toStdString();
 
-    return ret;
+    return static_cast<int>(ret);
 }
 
 bool UdpCommu::startAsyncRecv(UdpRecvHandler handler)
@@ -81,15 +61,17 @@ bool UdpCommu::startAsyncRecv(UdpRecvHandler handler)
     if (handler == nullptr)
         setFailedMsgAndReturnFalse("handler不能为空")
 
-    if (mSocket == -1)
+    if (mSocket.load(std::memory_order_acquire) == nullptr)
         setFailedMsgAndReturnFalse("请先初始化socket");
 
-    mRecvHandler = handler;
+    {
+        lock_guard<mutex> lock(mHandlerMutex);
+        mRecvHandler = handler;
+    }
     if (!mAsyncMode)
     {
         mAsyncMode = true;
-        std::thread t(&UdpCommu::recvThread, this);
-        t.detach();
+        mRecvThread = std::thread(&UdpCommu::recvThread, this);
     }
 
     return true;
@@ -97,53 +79,46 @@ bool UdpCommu::startAsyncRecv(UdpRecvHandler handler)
 
 void UdpCommu::close()
 {
-    if (mSocket == -1)
+    if (mSocket.load(std::memory_order_relaxed) == nullptr && !mRecvThread.joinable())
         return;
 
-    ::close(mSocket);
-    mSocket = -1;
-    mAsyncMode=false;
+    mAsyncMode = false;
+    if (mRecvThread.joinable())
+        mRecvThread.join();
+
+    auto socket = mSocket.exchange(nullptr, std::memory_order_acq_rel);
+    if (socket != nullptr)
+    {
+        delete socket;
+    }
 }
 
 string UdpCommu::getBoundMac()
 {
-    //osx未定义SIOCGIFHWADDR,写死获取en0
-    int         mib[6];
-    size_t len=0;
-    unsigned char       *ptr;
-    struct if_msghdr    *ifm;
-    struct sockaddr_dl  *sdl;
+    auto interfaces = QNetworkInterface::allInterfaces();
+    for (const auto& iface : interfaces)
+    {
+        auto flags = iface.flags();
+        if (flags & QNetworkInterface::IsLoopBack)
+            continue;
+        if (!(flags & (QNetworkInterface::IsUp | QNetworkInterface::IsRunning)))
+            continue;
 
-    mib[0] = CTL_NET;
-    mib[1] = AF_ROUTE;
-    mib[2] = 0;
-    mib[3] = AF_LINK;
-    mib[4] = NET_RT_IFLIST;
-    if ((mib[5] = if_nametoindex("en0")) == 0) {
-        perror("if_nametoindex error");
-        return "";
+        auto mac = iface.hardwareAddress().toLower().toStdString();
+        if (mac.empty())
+            continue;
+
+        string compact;
+        for (auto ch : mac)
+        {
+            if (ch != ':' && ch != '-' && ch != '.')
+                compact.push_back(ch);
+        }
+        if (!compact.empty())
+            return compact;
     }
 
-    if (sysctl(mib, 6, NULL, &len, NULL, 0) < 0) {
-        perror("sysctl 1 error");
-        return "";
-    }
-
-    unique_ptr<char[]> buf(new char[len]);
-    if (sysctl(mib, 6, buf.get(), &len, NULL, 0) < 0) {
-        perror("sysctl 2 error");
-        return "";
-    }
-
-    ifm = (struct if_msghdr *)buf.get();
-    sdl = (struct sockaddr_dl *)(ifm + 1);
-    ptr = (unsigned char *)LLADDR(sdl);
-
-    char macStr[20]={0};
-    snprintf(macStr, sizeof(macStr), "%02x%02x%02x%02x%02x%02x", *ptr, *(ptr+1), *(ptr+2),
-           *(ptr+3), *(ptr+4), *(ptr+5));
-
-    return macStr;
+    return "";
 }
 
 string UdpCommu::getErrMsg()
@@ -153,37 +128,51 @@ string UdpCommu::getErrMsg()
 
 void UdpCommu::recvThread()
 {
-    timeval timeo = {3,0};
-    auto ret = setsockopt(mSocket, SOL_SOCKET, SO_RCVTIMEO, &timeo, sizeof(timeval));
-    if (ret != 0){
-        printf("faield to set recv timeo\n");
-        mAsyncMode=false;
-        return;
-    }
-
     std::array<char,MAX_RCV_SIZE> buf;
-    sockaddr_in addr;
-    socklen_t len = sizeof(addr);
-
-    while (mSocket != -1) {
-        buf.fill(0);
-        memset(&addr, 0, len);
-
-        auto size = recvfrom(mSocket, buf.data(), MAX_RCV_SIZE, 0, (sockaddr*)&addr, &len);
-        if (size < 0)
-        {
-            if (errno == EAGAIN || errno == ETIMEDOUT)
-                continue;
-
-            printf("error occur:%s\n", strerror(errno));
+    while (mAsyncMode) {
+        auto socket = mSocket.load(std::memory_order_acquire);
+        if (socket == nullptr)
             break;
+
+        buf.fill(0);
+        if (!socket->waitForReadyRead(500))
+        {
+            if (!mAsyncMode)
+                break;
+            if (socket->error() != QAbstractSocket::NoError)
+                socket->clearError();
+            continue;
         }
 
-        auto ip = inet_ntoa(addr.sin_addr);
-        vector<char> data(std::begin(buf), std::begin(buf)+size);
-        mRecvHandler(ip, data);
+        while (socket->hasPendingDatagrams()) {
+            auto pendingSize = socket->pendingDatagramSize();
+            if (pendingSize <= 0 || pendingSize > MAX_RCV_SIZE)
+            {
+                socket->readDatagram(buf.data(), MAX_RCV_SIZE);
+                continue;
+            }
+
+            QHostAddress addr;
+            quint16 port = 0;
+            auto size = socket->readDatagram(buf.data(), pendingSize, &addr, &port);
+            if (size < 0)
+            {
+                if (mAsyncMode)
+                    socket->clearError();
+                break;
+            }
+
+            auto ip = addr.toString().toStdString();
+            vector<char> data(std::begin(buf), std::begin(buf)+size);
+            UdpRecvHandler handler;
+            {
+                lock_guard<mutex> lock(mHandlerMutex);
+                handler = mRecvHandler;
+            }
+            if (handler)
+                handler(ip, data);
+        }
     }
 
-    printf("end recv thread\n");
     mAsyncMode=false;
 }

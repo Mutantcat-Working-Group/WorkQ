@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=我Q
+Name[en]=WorkQ
+GenericName=IPMSG Client
+GenericName[zh_CN]=飞鸽传书客户端
+Comment=IPMSG compatible instant messaging client
+Comment[zh_CN]=兼容飞秋/IPMSG 的局域网即时通讯软件
+Exec=WorkQ
+Icon=workq
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+StartupNotify=true
+StartupWMClass=WorkQ

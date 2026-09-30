@@ -4,11 +4,13 @@
 #include <string>
 using namespace std;
 
+class QTcpSocket;
+
 class TcpSocket
 {
 public:
     TcpSocket();
-    TcpSocket(int socket);
+    explicit TcpSocket(QTcpSocket* socket);
     ~TcpSocket();
 
 public:
@@ -27,7 +29,7 @@ public:
     int recv(void* data, int size, int msTimeout = 1000);
 
 private:
-    int mSocket=-1;
+    QTcpSocket* mSocket=nullptr;
     string mPeerIp;
 };
 

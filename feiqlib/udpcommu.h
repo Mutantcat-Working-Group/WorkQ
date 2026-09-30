@@ -4,7 +4,12 @@
 #include <string>
 #include <functional>
 #include <vector>
+#include <mutex>
+#include <thread>
+#include <atomic>
 using namespace std;
+
+class QUdpSocket;
 
 #define MAX_RCV_SIZE 4096
 typedef function<void (const string& ip, vector<char> &data)> UdpRecvHandler;
@@ -13,6 +18,7 @@ class UdpCommu
 {
 public:
     UdpCommu();
+    ~UdpCommu();
 public:
     /**
      * @brief bindTo 绑定到本地端口
@@ -57,12 +63,15 @@ public:
 
 private:
     void recvThread();
-    bool mAsyncMode=false;
+    atomic<bool> mAsyncMode{false};
 
 private:
     string mErrMsg="";
-    int mSocket=-1;
+    std::atomic<QUdpSocket*> mSocket{nullptr};
     UdpRecvHandler mRecvHandler=nullptr;
+    mutex mSendMutex;
+    mutex mHandlerMutex;
+    thread mRecvThread;
 };
 
 #endif // UDPCOMMU_H

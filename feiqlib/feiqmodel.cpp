@@ -99,7 +99,7 @@ shared_ptr<FileTask> FeiqModel::findTask(IdType packetNo, IdType fileId, FileTas
             continue;
 
         auto content = task->getContent();
-        if (content->fileId == fileId && content->packetNo == packetNo)
+        if (content && content->fileId == fileId && content->packetNo == packetNo)
             return task;
     }
 

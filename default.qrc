@@ -1,6 +1,6 @@
 <RCC>
     <qresource prefix="/default">
-        <file>res/icon.png</file>
+        <file alias="res/icon.png">icon.png</file>
         <file>res/face/1.gif</file>
         <file>res/face/2.gif</file>
         <file>res/face/3.gif</file>

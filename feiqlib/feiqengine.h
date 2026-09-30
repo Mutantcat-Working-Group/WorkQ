@@ -7,6 +7,10 @@
 #include <tuple>
 #include <list>
 #include <unordered_map>
+#include <atomic>
+#include <mutex>
+#include <thread>
+#include <condition_variable>
 #include "feiqmodel.h"
 #include "msgqueuethread.h"
 #include "ifeiqview.h"
@@ -24,6 +28,7 @@ class FeiqEngine
 {
 public:
     FeiqEngine();
+    ~FeiqEngine();
 
 public:
     pair<bool, string> send(shared_ptr<Fellow> fellow, shared_ptr<Content> content);
@@ -59,6 +64,7 @@ private://trigers
 
 private:
     void fileServerHandler(unique_ptr<TcpSocket> client, int packetNo, int fileId, int offset);
+    void trackThread(std::thread thd);
 
 private:
     shared_ptr<Fellow> addOrUpdateFellow(shared_ptr<Fellow> fellow);
@@ -72,10 +78,18 @@ private:
     string mHost;
     string mName;
     MsgQueueThread<ViewEvent> mMsgThd;
-    IFeiqView* mView;
+    IFeiqView* mView = nullptr;
     vector<string> mBroadcast;
-    bool mStarted=false;
+    atomic<bool> mStarted{false};
     AsynWait mAsyncWait;//异步等待对方回包
+
+    mutex mThreadsMutex;
+    list<std::thread> mFileThreads;
+    mutex mSendMutex;
+    std::thread mIntervalThread;
+    mutex mIntervalMutex;
+    condition_variable mIntervalCv;
+    int mIntervalGen = 0;
 
     struct EnumClassHash
     {

@@ -1,0 +1,411 @@
+name: Build WorkQ
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  QT_VERSION: "6.8.3"
+
+jobs:
+  linux-x86_64:
+    name: Linux AppImage (x86_64)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+
+      - name: Resolve version
+        shell: bash
+        run: |
+          buildDate="$(TZ=Asia/Shanghai date +%Y%m%d)"
+          echo "VERSION=1.0.$buildDate" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: |
+          mkdir -p build
+          cd build
+          qmake ../workq.pro CONFIG+=release
+          make -j"$(nproc)"
+
+      - name: Package AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          LDAI_OUTPUT: WorkQ-${{ env.VERSION }}-linux-x86_64.AppImage
+        run: |
+          set -euxo pipefail
+          cd build
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir --executable WorkQ \
+            --desktop-file ../packaging/linux/WorkQ.desktop \
+            --icon-file ../icon.png \
+            --plugin qt \
+            --output appimage
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: WorkQ-linux-x86_64
+          path: build/WorkQ-${{ env.VERSION }}-linux-x86_64.AppImage
+          if-no-files-found: error
+
+  macos-x86_64:
+    name: macOS DMG (x86_64)
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+
+      - name: Resolve version
+        shell: bash
+        run: |
+          buildDate="$(TZ=Asia/Shanghai date +%Y%m%d)"
+          echo "VERSION=1.0.$buildDate" >> "$GITHUB_ENV"
+
+      - name: Prepare app icons
+        run: |
+          set -euxo pipefail
+          rm -rf icon.iconset icon.icns
+          mkdir -p icon.iconset
+          sips -z 16 16 icon.png --out icon.iconset/icon_16x16.png >/dev/null
+          sips -z 32 32 icon.png --out icon.iconset/icon_16x16@2x.png >/dev/null
+          sips -z 32 32 icon.png --out icon.iconset/icon_32x32.png >/dev/null
+          sips -z 64 64 icon.png --out icon.iconset/icon_32x32@2x.png >/dev/null
+          sips -z 128 128 icon.png --out icon.iconset/icon_128x128.png >/dev/null
+          sips -z 256 256 icon.png --out icon.iconset/icon_128x128@2x.png >/dev/null
+          sips -z 256 256 icon.png --out icon.iconset/icon_256x256.png >/dev/null
+          sips -z 512 512 icon.png --out icon.iconset/icon_256x256@2x.png >/dev/null
+          sips -z 512 512 icon.png --out icon.iconset/icon_512x512.png >/dev/null
+          sips -z 1024 1024 icon.png --out icon.iconset/icon_512x512@2x.png >/dev/null
+          iconutil -c icns icon.iconset -o icon.icns
+          rm -rf icon.iconset
+
+      - name: Build
+        run: |
+          mkdir -p build
+          cd build
+          qmake ../workq.pro CONFIG+=release
+          make -j"$(sysctl -n hw.ncpu)"
+
+      - name: Package DMG
+        run: |
+          set -euxo pipefail
+          cd build
+          macdeployqt WorkQ.app
+          codesign --force --deep --sign - --timestamp=none WorkQ.app
+          rm -rf dmg
+          mkdir -p dmg
+          cp -R WorkQ.app dmg/
+          ln -s /Applications dmg/Applications
+          cp ../icon.icns dmg/.VolumeIcon.icns
+          if command -v SetFile >/dev/null 2>&1; then SetFile -a C dmg; fi
+          hdiutil create -volname "我Q WorkQ" -srcfolder dmg -ov -format UDZO \
+            "WorkQ-${VERSION}-macos-x86_64.dmg"
+          # 容器签名只是额外加固，应用本身已在上一步完成 ad-hoc 签名
+          codesign --force --sign - --timestamp=none "WorkQ-${VERSION}-macos-x86_64.dmg" || true
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: WorkQ-macos-x86_64
+          path: build/WorkQ-${{ env.VERSION }}-macos-x86_64.dmg
+          if-no-files-found: error
+
+  macos-arm64:
+    name: macOS DMG (arm64)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+
+      - name: Resolve version
+        shell: bash
+        run: |
+          buildDate="$(TZ=Asia/Shanghai date +%Y%m%d)"
+          echo "VERSION=1.0.$buildDate" >> "$GITHUB_ENV"
+
+      - name: Prepare app icons
+        run: |
+          set -euxo pipefail
+          rm -rf icon.iconset icon.icns
+          mkdir -p icon.iconset
+          sips -z 16 16 icon.png --out icon.iconset/icon_16x16.png >/dev/null
+          sips -z 32 32 icon.png --out icon.iconset/icon_16x16@2x.png >/dev/null
+          sips -z 32 32 icon.png --out icon.iconset/icon_32x32.png >/dev/null
+          sips -z 64 64 icon.png --out icon.iconset/icon_32x32@2x.png >/dev/null
+          sips -z 128 128 icon.png --out icon.iconset/icon_128x128.png >/dev/null
+          sips -z 256 256 icon.png --out icon.iconset/icon_128x128@2x.png >/dev/null
+          sips -z 256 256 icon.png --out icon.iconset/icon_256x256.png >/dev/null
+          sips -z 512 512 icon.png --out icon.iconset/icon_256x256@2x.png >/dev/null
+          sips -z 512 512 icon.png --out icon.iconset/icon_512x512.png >/dev/null
+          sips -z 1024 1024 icon.png --out icon.iconset/icon_512x512@2x.png >/dev/null
+          iconutil -c icns icon.iconset -o icon.icns
+          rm -rf icon.iconset
+
+      - name: Build
+        run: |
+          mkdir -p build
+          cd build
+          qmake ../workq.pro CONFIG+=release
+          make -j"$(sysctl -n hw.ncpu)"
+
+      - name: Package DMG
+        run: |
+          set -euxo pipefail
+          cd build
+          macdeployqt WorkQ.app
+          codesign --force --deep --sign - --timestamp=none WorkQ.app
+          rm -rf dmg
+          mkdir -p dmg
+          cp -R WorkQ.app dmg/
+          ln -s /Applications dmg/Applications
+          cp ../icon.icns dmg/.VolumeIcon.icns
+          if command -v SetFile >/dev/null 2>&1; then SetFile -a C dmg; fi
+          hdiutil create -volname "我Q WorkQ" -srcfolder dmg -ov -format UDZO \
+            "WorkQ-${VERSION}-macos-arm64.dmg"
+          # 容器签名只是额外加固，应用本身已在上一步完成 ad-hoc 签名
+          codesign --force --sign - --timestamp=none "WorkQ-${VERSION}-macos-arm64.dmg" || true
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: WorkQ-macos-arm64
+          path: build/WorkQ-${{ env.VERSION }}-macos-arm64.dmg
+          if-no-files-found: error
+
+  windows-x86_64:
+    name: Windows NSIS (x86_64)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
+
+      - name: Resolve version
+        shell: pwsh
+        run: |
+          $buildDate = (Get-Date).ToUniversalTime().AddHours(8).ToString('yyyyMMdd')
+          "VERSION=1.0.$buildDate" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+
+      - name: Prepare app icon
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check -q Pillow
+          $py = @'
+          from PIL import Image
+          img = Image.open("icon.png")
+          img.save("res/workq.ico", format="ICO", sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])
+          '@
+          $py | python -
+
+      - name: Build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path build -Force | Out-Null
+          Push-Location build
+          qmake ..\workq.pro CONFIG+=release
+          nmake
+          Pop-Location
+          $exe = if (Test-Path 'build\release\WorkQ.exe') { 'build\release\WorkQ.exe' } else { 'build\WorkQ.exe' }
+          if (-not (Test-Path $exe)) { throw "Build output not found: $exe" }
+          "RELEASE_EXE=$((Resolve-Path $exe).Path)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+
+      - name: Deploy Qt runtime
+        shell: pwsh
+        run: |
+          windeployqt --release --compiler-runtime $env:RELEASE_EXE
+
+      - name: Sign binaries with self-signed certificate
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File packaging\windows\create-self-signed-cert.ps1 -OutputDir $env:RUNNER_TEMP
+          $releaseDir = Split-Path -Parent $env:RELEASE_EXE
+          Get-ChildItem -Path $releaseDir -Recurse -File | Where-Object { $_.Extension -in '.exe', '.dll' } | ForEach-Object {
+            & signtool sign /f $env:WORKQ_CERT_PATH /p $env:WORKQ_CERT_PASSWORD /fd SHA256 $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "signtool failed: $($_.FullName)" }
+          }
+
+      - name: Build NSIS installer
+        shell: pwsh
+        run: |
+          $nsis = 'C:\Program Files (x86)\NSIS\makensis.exe'
+          if (-not (Test-Path $nsis) -and -not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            choco install nsis -y --no-progress
+          }
+          if (Test-Path $nsis) {
+            $makensis = Get-Command $nsis -ErrorAction Stop
+          } else {
+            $makensis = Get-Command makensis -ErrorAction Stop
+          }
+          $releaseDir = Split-Path -Parent $env:RELEASE_EXE
+          & $makensis.Source "/DVERSION=$env:VERSION" "/DARCH=x86_64" "/DSOURCE_DIR=$releaseDir" "/DOUTPUT_DIR=$env:GITHUB_WORKSPACE" "$env:GITHUB_WORKSPACE\packaging\windows\installer.nsi"
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed" }
+
+      - name: Sign installer
+        shell: pwsh
+        run: |
+          $installer = "WorkQ-$env:VERSION-windows-x86_64-setup.exe"
+          & signtool sign /f $env:WORKQ_CERT_PATH /p $env:WORKQ_CERT_PASSWORD /fd SHA256 $installer
+          if ($LASTEXITCODE -ne 0) { throw "signtool failed: $installer" }
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: WorkQ-windows-x86_64
+          path: WorkQ-${{ env.VERSION }}-windows-x86_64-setup.exe
+          if-no-files-found: error
+
+  windows-arm64:
+    name: Windows NSIS (arm64)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: win64_msvc2022_arm64
+          cache: true
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64_arm64
+
+      - name: Resolve version
+        shell: pwsh
+        run: |
+          $buildDate = (Get-Date).ToUniversalTime().AddHours(8).ToString('yyyyMMdd')
+          "VERSION=1.0.$buildDate" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+
+      - name: Prepare app icon
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check -q Pillow
+          $py = @'
+          from PIL import Image
+          img = Image.open("icon.png")
+          img.save("res/workq.ico", format="ICO", sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])
+          '@
+          $py | python -
+
+      - name: Build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path build -Force | Out-Null
+          Push-Location build
+          qmake ..\workq.pro CONFIG+=release
+          nmake
+          Pop-Location
+          $exe = if (Test-Path 'build\release\WorkQ.exe') { 'build\release\WorkQ.exe' } else { 'build\WorkQ.exe' }
+          if (-not (Test-Path $exe)) { throw "Build output not found: $exe" }
+          "RELEASE_EXE=$((Resolve-Path $exe).Path)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+
+      - name: Deploy Qt runtime
+        shell: pwsh
+        run: |
+          windeployqt --release --compiler-runtime $env:RELEASE_EXE
+
+      - name: Sign binaries with self-signed certificate
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File packaging\windows\create-self-signed-cert.ps1 -OutputDir $env:RUNNER_TEMP
+          $releaseDir = Split-Path -Parent $env:RELEASE_EXE
+          Get-ChildItem -Path $releaseDir -Recurse -File | Where-Object { $_.Extension -in '.exe', '.dll' } | ForEach-Object {
+            & signtool sign /f $env:WORKQ_CERT_PATH /p $env:WORKQ_CERT_PASSWORD /fd SHA256 $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "signtool failed: $($_.FullName)" }
+          }
+
+      - name: Build NSIS installer
+        shell: pwsh
+        run: |
+          $nsis = 'C:\Program Files (x86)\NSIS\makensis.exe'
+          if (-not (Test-Path $nsis) -and -not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            choco install nsis -y --no-progress
+          }
+          if (Test-Path $nsis) {
+            $makensis = Get-Command $nsis -ErrorAction Stop
+          } else {
+            $makensis = Get-Command makensis -ErrorAction Stop
+          }
+          $releaseDir = Split-Path -Parent $env:RELEASE_EXE
+          & $makensis.Source "/DVERSION=$env:VERSION" "/DARCH=arm64" "/DSOURCE_DIR=$releaseDir" "/DOUTPUT_DIR=$env:GITHUB_WORKSPACE" "$env:GITHUB_WORKSPACE\packaging\windows\installer.nsi"
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed" }
+
+      - name: Sign installer
+        shell: pwsh
+        run: |
+          $installer = "WorkQ-$env:VERSION-windows-arm64-setup.exe"
+          & signtool sign /f $env:WORKQ_CERT_PATH /p $env:WORKQ_CERT_PASSWORD /fd SHA256 $installer
+          if ($LASTEXITCODE -ne 0) { throw "signtool failed: $installer" }
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: WorkQ-windows-arm64
+          path: WorkQ-${{ env.VERSION }}-windows-arm64-setup.exe
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-22.04
+    needs: [linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64, windows-arm64]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: WorkQ-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: 我Q WorkQ ${{ github.ref_name }}
+          body: |
+            自动构建发布。
+
+            - Linux：AppImage
+            - macOS：DMG（x86_64 / arm64，ad-hoc 签名，含 Applications 快捷方式）
+            - Windows：NSIS 安装包（x86_64 / arm64，简体中文界面）
+          files: dist/*
+          fail_on_unmatched_files: true

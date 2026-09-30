@@ -1,42 +1,22 @@
 #include "platformdepend.h"
-
-#ifdef Q_OS_OSX
-#include "osx/osxplatform.h"
-#endif
-
-class MockPlatform : public IPlatform
-{
-public:
-    long showNotify(const QString& title, const QString& content, const QString& data)
-    {
-        (void)title;
-        (void)content;
-        (void)data;
-        return 0;
-    }
-    void hideAllNotify()
-    {
-
-    }
-
-    void setBadgeNumber(int number)
-    {
-        (void)number;
-    }
-};
+#include "mainwindow.h"
+#include <QSystemTrayIcon>
+#include <QIcon>
 
 PlatformDepend::PlatformDepend()
 {
-#ifdef Q_OS_OSX
-    mImpl = new OsxPlatform();
-#else
-    mImpl = new MockPlatform();
-#endif
+    mTray = nullptr;
+    if (QSystemTrayIcon::isSystemTrayAvailable())
+    {
+        mTray = new QSystemTrayIcon(QIcon(":/default/res/icon.png"));
+        mTray->setToolTip(QStringLiteral("我Q"));
+        mTray->show();
+    }
 }
 
 PlatformDepend::~PlatformDepend()
 {
-    delete mImpl;
+    delete mTray;
 }
 
 PlatformDepend &PlatformDepend::instance()
@@ -47,21 +27,38 @@ PlatformDepend &PlatformDepend::instance()
 
 long PlatformDepend::showNotify(const QString &title, const QString &content, const QString &fellowIp)
 {
-    return mImpl->showNotify(title, content, fellowIp);
+    if (mTray == nullptr)
+        return 0;
+
+    mLastFellowIp = fellowIp;
+    mTray->showMessage(title, content, QSystemTrayIcon::Information, 8000);
+    return ++mNextNotifyId;
 }
 
 void PlatformDepend::hideAllNotify()
 {
-    mImpl->hideAllNotify();
+    // QSystemTrayIcon 没有通用的隐藏消息气泡接口，这里保留占位
 }
 
 void PlatformDepend::setBadgeNumber(int number)
 {
-    mImpl->setBadgeNumber(number);
+    Q_UNUSED(number);
+    // Windows/Linux 桌面没有原生 dock badge，暂不处理
 }
 
 void PlatformDepend::setMainWnd(MainWindow *mainWnd)
 {
-    IPlatform::setMainWnd(mainWnd);
-    mImpl->setMainWnd(mainWnd);
+    mMainWnd = mainWnd;
+    if (mTray == nullptr)
+        return;
+
+    auto openMainWindow = [this](){
+        if (mMainWnd != nullptr && !mLastFellowIp.isEmpty())
+            mMainWnd->onNotifyClicked(mLastFellowIp);
+    };
+    QObject::connect(mTray, &QSystemTrayIcon::messageClicked, openMainWindow);
+    QObject::connect(mTray, &QSystemTrayIcon::activated, [this, openMainWindow](QSystemTrayIcon::ActivationReason reason){
+        if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick)
+            openMainWindow();
+    });
 }

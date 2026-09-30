@@ -1,28 +1,19 @@
 #include "tcpsocket.h"
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include <stdio.h>
-#include <sys/time.h>
-#include <errno.h>
-#include <unistd.h>
+#include <QTcpSocket>
+#include <QHostAddress>
+#include <QString>
 
 TcpSocket::TcpSocket()
 {
 
 }
 
-TcpSocket::TcpSocket(int socket)
+TcpSocket::TcpSocket(QTcpSocket *socket)
 {
     mSocket = socket;
-    if (mSocket != -1)
+    if (mSocket != nullptr)
     {
-        sockaddr_in addr;
-        socklen_t len = sizeof(addr);
-        auto ret = getpeername(mSocket, (sockaddr*)&addr, &len);
-        if (ret == 0)
-        {
-            mPeerIp = inet_ntoa(addr.sin_addr);
-        }
+        mPeerIp = mSocket->peerAddress().toString().toStdString();
     }
 }
 
@@ -33,60 +24,52 @@ TcpSocket::~TcpSocket()
 
 bool TcpSocket::connect(const string &ip, int port)
 {
-    if (mSocket != -1)
+    if (mSocket != nullptr)
         return true;
 
-    mSocket = socket(AF_INET, SOCK_STREAM, 0);
-    if (mSocket == -1)
+    auto socket = new QTcpSocket();
+    socket->connectToHost(QString::fromStdString(ip), static_cast<quint16>(port));
+    if (!socket->waitForConnected(3000))
     {
-        perror("faield to create socket");
+        delete socket;
         return false;
     }
 
-    sockaddr_in addr;
-    addr.sin_addr.s_addr = inet_addr(ip.c_str());
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    int ret = ::connect(mSocket, (sockaddr*)&addr, sizeof(addr));
-    if (ret == -1)
-    {
-        perror("failed to connect");
-        close(mSocket);
-        return false;
-    }
-
+    mSocket = socket;
     mPeerIp = ip;
     return true;
 }
 
 void TcpSocket::disconnect()
 {
-    if (mSocket != -1)
+    if (mSocket != nullptr)
     {
-        close(mSocket);
-        mPeerIp="";
+        mSocket->abort();
+        delete mSocket;
+        mSocket = nullptr;
+        mPeerIp.clear();
     }
 }
 
 int TcpSocket::send(const void *data, int size)
 {
+    if (mSocket == nullptr)
+        return -1;
+
     int sent = 0;
     auto pdata = static_cast<const char*>(data);
 
     while (sent < size)
     {
-        int ret = ::send(mSocket, pdata+sent, size-sent, 0);
-        if (ret == -1 )
+        auto ret = mSocket->write(pdata+sent, size-sent);
+        if (ret <= 0)
         {
-            if (errno != EAGAIN)
-            {
-                perror("tcp send failed");
-                return -1;
-            }
-            continue;
+            return -1;
         }
 
-        sent+=ret;
+        sent += static_cast<int>(ret);
+        if (!mSocket->waitForBytesWritten(5000))
+            return -1;
     }
 
     return sent;
@@ -94,20 +77,21 @@ int TcpSocket::send(const void *data, int size)
 
 int TcpSocket::recv(void *data, int size, int msTimeout)
 {
-    timeval tv = {msTimeout/1000, (msTimeout%1000)*1000};
-    setsockopt(mSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    if (mSocket == nullptr)
+        return -2;
 
-    int ret = ::recv(mSocket, data, size, 0);
-    if (ret == -1)
+    if (!mSocket->waitForReadyRead(msTimeout))
     {
-        if (errno == ETIMEDOUT || errno == EAGAIN)
+        if (mSocket->error() == QAbstractSocket::SocketTimeoutError)
             return -1;
-        else
-        {
-            perror("recv failed");
-            return -2;
-        }
+        return -2;
     }
 
-    return ret;
+    auto ret = mSocket->read(static_cast<char*>(data), size);
+    if (ret <= 0)
+    {
+        return -2;
+    }
+
+    return static_cast<int>(ret);
 }

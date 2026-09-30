@@ -14,6 +14,7 @@ class RecvTextEdit: public QTextEdit
     Q_OBJECT
 public:
     RecvTextEdit(QWidget* parent = 0);
+    virtual ~RecvTextEdit() override;
 
 protected:
     virtual void mousePressEvent(QMouseEvent *e) override;

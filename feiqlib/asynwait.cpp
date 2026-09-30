@@ -1,6 +1,4 @@
 #include "asynwait.h"
-#include <thread>
-#include <unistd.h>
 
 AsynWait::AsynWait()
 {
@@ -22,7 +20,8 @@ void AsynWait::start(int precision)
 void AsynWait::stop()
 {
     mStarted=false;
-    mThd.join();
+    if (mThd.joinable())
+        mThd.join();
 }
 
 void AsynWait::addWaitPack(IdType packetId, AsynWait::OnWaitTimeout onTimeout, int msTimeo)
@@ -41,7 +40,7 @@ void AsynWait::clearWaitPack(IdType packetId)
 {
     mPacksMutex.lock();
     mWaitPacks.remove_if([packetId](WaitPack pack){
-        return pack.id = packetId;
+        return pack.id == packetId;
     });
     mPacksMutex.unlock();
 }
@@ -50,7 +49,7 @@ void AsynWait::run()
 {
     list<WaitPack> timeos;
     while (mStarted) {
-        usleep(mPrecision*1000);
+        std::this_thread::sleep_for(milliseconds(mPrecision));
         timeos.clear();
 
         auto cur = system_clock::now();

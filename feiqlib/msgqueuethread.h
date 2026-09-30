@@ -6,9 +6,8 @@
 #include <functional>
 #include <condition_variable>
 #include <thread>
+#include <atomic>
 using namespace std;
-
-//TODO:实现移到cpp中
 template<class Msg>
 class MsgQueueThread
 {
@@ -55,7 +54,7 @@ private:
     {
         while (mRun) {
             unique_lock<mutex> lock(mQueueMutex);
-            if (mQueue.empty())
+            while (mRun && mQueue.empty())
                 mQueueCnd.wait(lock);
             if (!mRun)
                 return;
@@ -74,7 +73,7 @@ private:
     condition_variable mQueueCnd;
     mutex mQueueMutex;
     queue<shared_ptr<Msg>> mQueue;
-    bool mRun=false;
+    atomic<bool> mRun{false};
     Handler mHandler;
     thread mThread;
 };

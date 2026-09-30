@@ -70,7 +70,7 @@ public:
 private:
     void onRecv(const string& ip, vector<char> &data);
     vector<char> pack(SendProtocol& sender, IdType *packetId = nullptr);
-    void onTcpClientConnected(int socket);
+    void onTcpClientConnected(std::unique_ptr<TcpSocket> client);
 private:
     vector<RecvProtocol*> mRecvPrtocols;
     UdpCommu mUdp;

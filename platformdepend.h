@@ -3,6 +3,7 @@
 
 #include <QString>
 class MainWindow;
+class QSystemTrayIcon;
 
 class IPlatform
 {
@@ -22,13 +23,6 @@ public:
 
 class PlatformDepend : public IPlatform
 {
-private:
-    PlatformDepend();
-    ~PlatformDepend();
-
-public:
-    static PlatformDepend& instance();
-
 public:
     long showNotify(const QString& title, const QString& content, const QString & fellowIp) override;
     void hideAllNotify() override;
@@ -36,8 +30,16 @@ public:
     void setBadgeNumber(int number) override;
 
     void setMainWnd(MainWindow* mainWnd) override;
+
+    static PlatformDepend& instance();
 private:
-    IPlatform* mImpl;
+    PlatformDepend();
+    ~PlatformDepend();
+
+    QSystemTrayIcon* mTray;
+    MainWindow* mMainWnd = nullptr;
+    long mNextNotifyId = 0;
+    QString mLastFellowIp;
 };
 
 #endif // PLATFORMDEPEND_H

@@ -4,31 +4,18 @@
 #
 #-------------------------------------------------
 
-QT       += core gui network
+QT       += core gui network widgets
 
-greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
+CONFIG   += c++17
 
-TARGET = feiq
+TARGET = WorkQ
 TEMPLATE = app
 
-LIBS += -liconv -lsqlite3
+lessThan(QT_MAJOR_VERSION, 6): error("WorkQ 需要 Qt 6 或更高版本")
 
-mac{
-    QT += macextras
-
-    ICON = icon.icns
-
-    LIBS += -framework Foundation
-
-    OBJECTIVE_SOURCES += osx/notification.mm\
-                    osx/notificationimpl.mm
-
-    SOURCES += osx/osxplatform.cpp
-
-    HEADERS += osx/notification.h\
-                osx/osxplatform.h\
-                osx/notificationimpl.h
-}
+# 统一图标源为根目录 icon.png；CI 会由它生成 res/workq.ico 和 icon.icns
+win32: RC_ICONS = res/workq.ico
+macx: ICON = icon.icns
 
 SOURCES += main.cpp\
         mainwindow.cpp \
@@ -44,7 +31,6 @@ SOURCES += main.cpp\
     feiqlib/filetask.cpp \
     feiqlib/defer.cpp \
     feiqlib/asynwait.cpp \
-    feiqlib/history.cpp \
     fellowlistwidget.cpp \
     searchfellowdlg.cpp \
     recvtextedit.cpp \
@@ -81,7 +67,6 @@ HEADERS  += mainwindow.h \
     feiqlib/filetask.h \
     feiqlib/defer.h \
     feiqlib/asynwait.h \
-    feiqlib/history.h \
     feiqlib/parcelable.h \
     fellowlistwidget.h \
     searchfellowdlg.h \

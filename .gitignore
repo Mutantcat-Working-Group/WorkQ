@@ -36,3 +36,12 @@ Makefile*
 # QtCtreator CMake
 CMakeLists.txt.user
 
+# Local build/output artifacts
+/build/
+/release/
+/debug/
+*.AppImage
+*.dmg
+*-setup.exe
+aqtinstall.log
+

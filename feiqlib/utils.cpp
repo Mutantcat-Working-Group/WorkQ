@@ -46,12 +46,14 @@ void stringReplace(string& target,const string& pattern,const string& candidate)
 
 string getFileNameFromPath(const string &path)
 {
-    auto sep = '/';
     auto result = path;
-    if (result.at(result.length()-1) == sep)
-        result = result.substr(0, result.length()-1);
+    while (!result.empty() && (result.back() == '/' || result.back() == '\\'))
+        result.pop_back();
 
-    auto pos = result.find_last_of('/');
+    if (result.empty())
+        return result;
+
+    auto pos = result.find_last_of("/\\");
     if (pos == string::npos)
         return result;
 

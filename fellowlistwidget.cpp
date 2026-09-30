@@ -20,6 +20,8 @@ void FellowListWidget::update(const Fellow &fellow)
         int row = requestRow(fellow);
         mWidget->insertItem(row, fellowText(fellow));
         item = mWidget->item(row);
+        if (item == nullptr)
+            return;
     }
     else
     {
@@ -104,7 +106,7 @@ QListWidgetItem *FellowListWidget::findFirstItem(const Fellow &fellow)
     {
         auto widget = mWidget->item(i);
         auto f = getFellow(widget);
-        if (f->getIp() == fellow.getIp())
+        if (f != nullptr && f->getIp() == fellow.getIp())
             return widget;
     }
 
@@ -122,6 +124,8 @@ int FellowListWidget::requestRow(const Fellow &fellow)
     for (; row > 0; row--)
     {
         auto f = getFellow(mWidget->item(row-1));
+        if (f == nullptr)
+            continue;
         auto ret = mRankPredict(*f, fellow);
         if (ret >= 0)
             break;
@@ -132,5 +136,7 @@ int FellowListWidget::requestRow(const Fellow &fellow)
 
 const Fellow *FellowListWidget::getFellow(const QListWidgetItem *item)
 {
+    if (item == nullptr)
+        return nullptr;
     return static_cast<const Fellow*>(item->data(Qt::UserRole).value<void*>());
 }

@@ -7,6 +7,7 @@
 #include <functional>
 #include "fellow.h"
 #include <string>
+#include <mutex>
 using namespace std;
 
 enum class FileTaskType{
@@ -37,14 +38,14 @@ public:
     FileTask(shared_ptr<FileContent> fileContent, FileTaskType type);
     void setObserver(IFileTaskObserver* observer);
 public:
-    void setProcess(int val);
+    void setProcess(long long val);
     void setState(FileTaskState val, const string& msg="");
     void setFellow(shared_ptr<Fellow> fellow);
     void cancel();
     bool hasCancelPending();
 public:
     shared_ptr<Fellow> fellow() const;
-    int getProcess() const;
+    long long getProcess() const;
     FileTaskState getState() const;
     string getDetailInfo() const;
     shared_ptr<FileContent> getContent() const;
@@ -52,15 +53,15 @@ public:
     string getTaskTypeDes() const;
 private:
     shared_ptr<Fellow> mFellow;//要发送给的用户，或文件来自该用户
-    int mProcess=0;
-    FileTaskState mState = FileTaskState::NotStart;
     shared_ptr<FileContent> mContent;
-    IFileTaskObserver* mObserver;
+    IFileTaskObserver* mObserver = nullptr;
     FileTaskType mType = FileTaskType::Upload;
+    mutable mutex mStateMutex;
+    long long mProcess = 0;
+    FileTaskState mState = FileTaskState::NotStart;
     string mMsg;
-    bool mCancelPending=false;
-    int mNotifySize;
-    int mLastProcess=0;
+    bool mCancelPending = false;
+    long long mLastProcess = 0;
 };
 
 #endif // FILETASK_H

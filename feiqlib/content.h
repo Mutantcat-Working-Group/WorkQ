@@ -4,10 +4,12 @@
 #include <string>
 #include "protocol.h"
 #include "uniqueid.h"
-#include <sys/stat.h>
 #include "ipmsg.h"
 #include "utils.h"
 #include "parcelable.h"
+#include <QFileInfo>
+#include <QDateTime>
+#include <QString>
 using namespace std;
 
 enum class ContentType{Text, Knock, File, Image, Id};
@@ -22,7 +24,7 @@ class Content : public Parcelable
 public:
     IdType packetNo;
     void setPacketNo(string val){
-        packetNo = stoul(val);
+        packetNo = safeParse<IdType>(val, 0);
     }
     void setPacketNo(IdType val){
         packetNo = val;
@@ -84,31 +86,25 @@ public:
     IdType fileId;
     string filename;
     string path;//保存路径或要发送的文件的路径
-    int size = 0;
-    int modifyTime = 0;
+    long long size = 0;
+    long long modifyTime = 0;
     int fileType = 0;
 
 public:
     static unique_ptr<FileContent> createFileContentToSend(const string& filePath)
     {
         static UniqueId mFileId;
-        struct stat fInfo;
-        auto ret = stat(filePath.c_str(), &fInfo);
-        if (ret != 0)
+        QFileInfo fileInfo(QString::fromStdString(filePath));
+        if (!fileInfo.exists() || !fileInfo.isFile())
             return nullptr;
 
         unique_ptr<FileContent> file(new FileContent());
         file->fileId = mFileId.get();
         file->path = filePath;
         file->filename = getFileNameFromPath(filePath);
-        if (S_ISREG(fInfo.st_mode))
-            file->fileType = IPMSG_FILE_REGULAR;
-        else if (S_ISREG(fInfo.st_mode))
-            file->fileType = IPMSG_FILE_DIR;
-        else
-            return nullptr;//先不支持其他类型
-        file->size = fInfo.st_size;
-        file->modifyTime = fInfo.st_mtimespec.tv_sec;
+        file->fileType = IPMSG_FILE_REGULAR;
+        file->size = static_cast<qint64>(fileInfo.size());
+        file->modifyTime = static_cast<qint64>(fileInfo.lastModified().toSecsSinceEpoch());
 
         return file;
     }

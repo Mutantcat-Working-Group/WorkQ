@@ -8,67 +8,96 @@ FileTask::FileTask()
 FileTask::FileTask(shared_ptr<FileContent> fileContent, FileTaskType type)
     :mContent(fileContent), mType(type)
 {
-    mNotifySize = fileContent->size/100;//每1%通知一次
-    const int minNotifySize = 102400;//至少变化了100k才通知
-    if (mNotifySize < minNotifySize)
-        mNotifySize = minNotifySize;
 }
 
 void FileTask::setObserver(IFileTaskObserver *observer)
 {
+    lock_guard<mutex> lock(mStateMutex);
     mObserver = observer;
 }
 
-void FileTask::setProcess(int val)
+void FileTask::setProcess(long long val)
 {
-    mProcess = val;
-    if (mProcess - mLastProcess >= mNotifySize
-        || mProcess >= mContent->size)
+    long long total = mContent ? mContent->size : 0;
+    const int minNotifySize = 102400;//至少变化了100k才通知
+    auto notifySize = total > 0 ? total/100 : minNotifySize;//每1%通知一次
+    if (notifySize < minNotifySize)
+        notifySize = minNotifySize;
+
+    bool shouldNotify = false;
     {
-        mLastProcess = mProcess;
-        mObserver->onProgress(this);
+        lock_guard<mutex> lock(mStateMutex);
+        mProcess = val;
+        if (mProcess - mLastProcess >= notifySize || mProcess >= total)
+        {
+            mLastProcess = mProcess;
+            shouldNotify = true;
+        }
     }
+
+    IFileTaskObserver* observer = nullptr;
+    {
+        lock_guard<mutex> lock(mStateMutex);
+        observer = mObserver;
+    }
+
+    if (shouldNotify && observer)
+        observer->onProgress(this);
 }
 
 void FileTask::setState(FileTaskState val, const string &msg)
 {
-    mState = val;
-    mMsg = msg;
-    mObserver->onStateChanged(this);
+    IFileTaskObserver* observer = nullptr;
+    {
+        lock_guard<mutex> lock(mStateMutex);
+        mState = val;
+        mMsg = msg;
+        observer = mObserver;
+    }
+
+    if (observer)
+        observer->onStateChanged(this);
 }
 
 void FileTask::setFellow(shared_ptr<Fellow> fellow)
 {
+    lock_guard<mutex> lock(mStateMutex);
     mFellow = fellow;
 }
 
 void FileTask::cancel()
 {
+    lock_guard<mutex> lock(mStateMutex);
     mCancelPending=true;
 }
 
 bool FileTask::hasCancelPending()
 {
+    lock_guard<mutex> lock(mStateMutex);
     return mCancelPending;
 }
 
 shared_ptr<Fellow> FileTask::fellow() const
 {
+    lock_guard<mutex> lock(mStateMutex);
     return mFellow;
 }
 
-int FileTask::getProcess() const
+long long FileTask::getProcess() const
 {
+    lock_guard<mutex> lock(mStateMutex);
     return mProcess;
 }
 
 FileTaskState FileTask::getState() const
 {
+    lock_guard<mutex> lock(mStateMutex);
     return mState;
 }
 
 string FileTask::getDetailInfo() const
 {
+    lock_guard<mutex> lock(mStateMutex);
     return mMsg;
 }
 

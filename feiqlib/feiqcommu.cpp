@@ -1,12 +1,12 @@
 #include "feiqcommu.h"
 #include "udpcommu.h"
 #include "ipmsg.h"
-#include <arpa/inet.h>
 #include "fellow.h"
 #include <sstream>
 #include <QDebug>
 #include <limits.h>
 #include "utils.h"
+#include <utility>
 
 FeiqCommu::FeiqCommu()
 {
@@ -39,11 +39,13 @@ pair<bool, string> FeiqCommu::start()
         return {false, "start aysnc recv failed:"+mUdp.getErrMsg()};
     }
 
+    mTcpServer.whenNewClient([this](std::unique_ptr<TcpSocket> client){
+        onTcpClientConnected(std::move(client));
+    });
     if (!mTcpServer.start(IPMSG_PORT)){
         mUdp.close();
         return {false, "无法启动文件服务"};
     }
-    mTcpServer.whenNewClient(std::bind(&FeiqCommu::onTcpClientConnected, this, placeholders::_1));
 
     //其他字段是什么意思呢？
     mMac = mUdp.getBoundMac();
@@ -54,6 +56,7 @@ pair<bool, string> FeiqCommu::start()
 void FeiqCommu::stop()
 {
     mUdp.close();
+    mTcpServer.stop();
 }
 
 pair<IdType, string> FeiqCommu::send(const string &ip, SendProtocol &sender)
@@ -171,12 +174,10 @@ vector<char> FeiqCommu::pack(SendProtocol &sender, IdType* packetId)
     return buf;
 }
 
-void FeiqCommu::onTcpClientConnected(int socket)
+void FeiqCommu::onTcpClientConnected(std::unique_ptr<TcpSocket> client)
 {
     if (mFileServerHandler)
     {
-        //接收请求
-        unique_ptr<TcpSocket> client(new TcpSocket(socket));
         std::array<char,MAX_RCV_SIZE> buf;
         int ret = client->recv(buf.data(), MAX_RCV_SIZE);
         if (ret <= 0)
@@ -194,9 +195,9 @@ void FeiqCommu::onTcpClientConnected(int socket)
         if (values.size() < 3)
             return;
 
-        int packetNo = stoi(values[0], 0, 16);
-        int fileId = stoi(values[1], 0, 16);
-        int offset = stoi(values[2], 0, 16);
+        int packetNo = safeParse<int>(values[0], 0, 16);
+        int fileId = safeParse<int>(values[1], 0, 16);
+        int offset = safeParse<int>(values[2], 0, 16);
 
         //处理请求
         mFileServerHandler(std::move(client), packetNo, fileId, offset);
@@ -223,11 +224,9 @@ bool FeiqCommu::dumpRaw(vector<char>& data, Post& post)
         }
         else
         {
-            vector<char> buf(size+1);
-            std::copy(ptr, found, buf.begin());
-            buf.push_back(0);
-            std::replace(buf.begin(), buf.end(), HOSTLIST_DUMMY, HLIST_ENTRY_SEPARATOR);
-            value[count]=toString(buf);//TODO:是否有编码问题？
+            string field(ptr, found);
+            std::replace(field.begin(), field.end(), HOSTLIST_DUMMY, HLIST_ENTRY_SEPARATOR);
+            value[count]=field;//TODO:是否有编码问题？
         }
 
         ptr=found+1;
@@ -239,13 +238,13 @@ bool FeiqCommu::dumpRaw(vector<char>& data, Post& post)
         return false;
 
     //解析
-    post.from->setVersion(value[0]);
-    post.packetNo = value[1];
     if (!post.from)
         post.from=make_shared<Fellow>();
+    post.from->setVersion(value[0]);
+    post.packetNo = value[1];
     post.from->setPcName(value[2]);
     post.from->setHost(value[3]);
-    post.cmdId = stoull(value[4]);
+    post.cmdId = safeParse<IdType>(value[4], 0);
 
     //取出extra部分
     if (ptr != last)

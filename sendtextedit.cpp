@@ -1,6 +1,7 @@
 #include "sendtextedit.h"
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QKeyEvent>
 #include <QMimeData>
 #include <QFileInfo>
 #include <QDebug>
@@ -61,8 +62,8 @@ bool SendTextEdit::eventFilter(QObject *, QEvent * e)
     if (e->type() == QEvent::KeyPress)
     {
         auto keyEvent = static_cast<QKeyEvent*>(e);
-        auto enter = keyEvent->key() == Qt::Key_Return;
-        auto ctrl  = keyEvent->modifiers() == Qt::ControlModifier;
+        auto enter = keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter;
+        auto ctrl  = (keyEvent->modifiers() & (Qt::ControlModifier | Qt::MetaModifier)) != Qt::NoModifier;
         if (enter && ctrl)
         {
             emit ctrlEnterPressed();

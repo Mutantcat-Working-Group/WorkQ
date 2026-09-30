@@ -3,6 +3,7 @@
 #include <sstream>
 #include <QMessageBox>
 #include <QFileDialog>
+#include <QDir>
 
 #define TYPE_COL 0
 #define STATE_COL 1
@@ -86,18 +87,19 @@ void FileManagerDlg::delSelTask()
 void FileManagerDlg::saveSelTask()
 {
     auto task = getTaskOfCurrentRow();
-    if (task && task->type() == FileTaskType::Download)
+    auto content = task ? task->getContent() : nullptr;
+    if (task && content && task->type() == FileTaskType::Download)
     {
-        if (task->getContent()->path.empty())
+        if (content->path.empty())
         {
             QString path = QFileDialog::getExistingDirectory(this, "选择保存到……");
             if (!path.isEmpty())
             {
-                task->getContent()->path = path.toStdString()+"/"+task->getContent()->filename;
+                content->path = QDir(path).filePath(content->filename.c_str()).toStdString();
             }
         }
 
-        if (!task->getContent()->path.empty())
+        if (content && !content->path.empty())
             mEngine->downloadFile(task);
     }
 }
@@ -116,8 +118,12 @@ void FileManagerDlg::refresh()
     reloadWith([filter](const FileTask& task){
         if (!filter.empty())
         {
-            return task.getContent()->filename.find(filter)!=string::npos
-                    ||task.fellow()->getName().find(filter)!=string::npos;
+            auto content = task.getContent();
+            auto fellow = task.fellow();
+            if (content == nullptr || fellow == nullptr)
+                return false;
+            return content->filename.find(filter)!=string::npos
+                    ||fellow->getName().find(filter)!=string::npos;
         }
         return true;
     });
@@ -136,14 +142,19 @@ void FileManagerDlg::reloadWith(FileManagerDlg::SearchPredict predict)
     auto tasks = mEngine->getModel().searchTask(predict);
     for (shared_ptr<FileTask> task : tasks)
     {
+        auto content = task->getContent();
+        auto fellow = task->fellow();
+        if (content == nullptr || fellow == nullptr)
+            continue;
+
         auto row = table->rowCount();
         table->insertRow(row);
         auto item = new QTableWidgetItem(typeString(task->type()));
         item->setData(Qt::UserRole, QVariant::fromValue((void*)(task.get())));//把task保存到UserRole中
         table->setItem(row, TYPE_COL, item);
         table->setItem(row, STATE_COL, new QTableWidgetItem(stateString(task.get())));
-        table->setItem(row, FELLOW_COL, new QTableWidgetItem(task->fellow()->getName().c_str()));
-        table->setItem(row, FILENAME_COL, new QTableWidgetItem(task->getContent()->filename.c_str()));
+        table->setItem(row, FELLOW_COL, new QTableWidgetItem(fellow->getName().c_str()));
+        table->setItem(row, FILENAME_COL, new QTableWidgetItem(content->filename.c_str()));
         table->setItem(row, PROGRESS_COL, new QTableWidgetItem(progressString(task.get())));
     }
     table->resizeColumnToContents(TYPE_COL);
@@ -151,7 +162,8 @@ void FileManagerDlg::reloadWith(FileManagerDlg::SearchPredict predict)
     table->resizeColumnToContents(FELLOW_COL);
     table->resizeColumnToContents(FILENAME_COL);
 
-    table->setCurrentCell(0,0);
+    if (table->rowCount() > 0)
+        table->setCurrentCell(0,0);
 }
 
 QString FileManagerDlg::typeString(FileTaskType type)
@@ -194,8 +206,16 @@ QString FileManagerDlg::stateString(const FileTask* task)
 QString FileManagerDlg::progressString(const FileTask *task)
 {
     stringstream ss;
-    float percent = task->getProcess()*100.0f/task->getContent()->size;
-    ss<<task->getProcess()<<"/"<<task->getContent()->size<<"("<<percent<<"%)";
+    long long total = task->getContent() ? task->getContent()->size : 0;
+    if (total > 0)
+    {
+        float percent = (static_cast<float>(task->getProcess()) * 100.0f / static_cast<float>(total));
+        ss<<task->getProcess()<<"/"<<total<<"("<<percent<<"%)";
+    }
+    else
+    {
+        ss<<task->getProcess()<<"/0(0%)";
+    }
     return ss.str().c_str();
 }
 
@@ -216,6 +236,8 @@ int FileManagerDlg::findRowByTask(const FileTask *task)
     for (int i = 0; i < rowCount; i++)
     {
         auto widget = ui->taskTable->item(i, TYPE_COL);
+        if (widget == nullptr)
+            continue;
         auto itemTask = static_cast<FileTask*>(widget->data(Qt::UserRole).value<void*>());
         if (itemTask == task)
             return i;

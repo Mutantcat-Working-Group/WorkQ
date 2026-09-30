@@ -1,6 +1,7 @@
 #ifndef PROTOCOL_H
 #define PROTOCOL_H
 
+#include <memory>
 #include <ostream>
 using namespace std;
 

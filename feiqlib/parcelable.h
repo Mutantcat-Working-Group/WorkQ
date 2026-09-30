@@ -4,6 +4,10 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
+#include <string>
+#include <memory>
+#include <cstring>
+#include "utils.h"
 
 using namespace std;
 
@@ -36,7 +40,7 @@ private:
         {
             char buf[9] = {0};
             is.read(buf, sizeof(buf)-1);
-            return stoi(buf);
+            return safeParse<int>(buf, 0);
         }
 
         void write(ostream& os){

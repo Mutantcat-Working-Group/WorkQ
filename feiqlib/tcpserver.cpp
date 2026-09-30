@@ -1,16 +1,17 @@
 #include "tcpserver.h"
-#include <sys/socket.h>
-#include <stdio.h>
-#include <string.h>
-#include <arpa/inet.h>
-#include <thread>
-#include <unistd.h>
-
-using namespace std;
+#include <QTcpServer>
+#include <QTcpSocket>
+#include <QHostAddress>
+#include "tcpsocket.h"
 
 TcpServer::TcpServer()
 {
 
+}
+
+TcpServer::~TcpServer()
+{
+    stop();
 }
 
 bool TcpServer::start(int port)
@@ -18,67 +19,74 @@ bool TcpServer::start(int port)
     if (mStarted)
         return true;
 
-    mSocket = socket(AF_INET, SOCK_STREAM, 0);
-    if (mSocket == -1)
+    auto server = new QTcpServer();
+    if (!server->listen(QHostAddress::AnyIPv4, static_cast<quint16>(port)))
     {
-        perror("create tcp socket failed: %s");
+        delete server;
         return false;
     }
 
-    int val = 1;
-    setsockopt(mSocket, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
-
-    sockaddr_in addr;
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons(port);
-    int ret = ::bind(mSocket, (sockaddr*)&addr, sizeof(addr));
-    if (ret == -1)
     {
-        perror("bind failed");
-        return false;
+        lock_guard<mutex> lock(mServerMutex);
+        mServer = server;
     }
-
-    ret = listen(mSocket, 5);
-    if (ret == -1)
-    {
-        perror("listen failed");
-        return false;
-    }
-
-    mStarted=true;
-    thread thd(&TcpServer::keepAccept, this);
-    thd.detach();
-
+    mStarted = true;
+    mAcceptThread = std::thread(&TcpServer::keepAccept, this);
     return true;
 }
 
 void TcpServer::whenNewClient(TcpServer::ClientHandler onClientConnected)
 {
+    lock_guard<mutex> lock(mServerMutex);
     mClientHandler = onClientConnected;
 }
 
 void TcpServer::stop()
 {
     mStarted = false;
-    close(mSocket);
+    if (mAcceptThread.joinable())
+        mAcceptThread.join();
+
+    QTcpServer* server = nullptr;
+    {
+        lock_guard<mutex> lock(mServerMutex);
+        server = mServer;
+        mServer = nullptr;
+    }
+    delete server;
 }
 
 void TcpServer::keepAccept()
 {
-    while (mStarted) {
-        sockaddr_in addr;
-        socklen_t len = sizeof(addr);
-        int ret = ::accept(mSocket, (sockaddr*)&addr, &len);
-        if (ret < 0)
+    while (mStarted)
+    {
+        QTcpServer* server;
+        ClientHandler handler;
         {
-            perror("failed to accept");
-            break;
+            lock_guard<mutex> lock(mServerMutex);
+            server = mServer;
+            handler = mClientHandler;
         }
 
-        if (mClientHandler)
+        if (server == nullptr)
+            break;
+
+        if (!server->waitForNewConnection(500))
         {
-            mClientHandler(ret);
+            if (!mStarted)
+                break;
+            continue;
+        }
+
+        while (server->hasPendingConnections())
+        {
+            auto socket = server->nextPendingConnection();
+            if (socket == nullptr)
+                break;
+            socket->setParent(nullptr);
+
+            if (handler)
+                handler(std::unique_ptr<TcpSocket>(new TcpSocket(socket)));
         }
     }
 }

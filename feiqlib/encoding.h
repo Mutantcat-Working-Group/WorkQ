@@ -3,16 +3,19 @@
 
 #include <vector>
 #include <string>
-using namespace std;
+#include <mutex>
+
+#ifndef _WIN32
 #include <iconv.h>
+#endif
 
 class Encoding
 {
 public:
-    Encoding(const string& fromCharset, const string& toCharset);
+    Encoding(const std::string& fromCharset, const std::string& toCharset);
     ~Encoding();
-    vector<char> convert(const vector<char>& str);
-    string convert(const string& str);
+    std::vector<char> convert(const std::vector<char>& str);
+    std::string convert(const std::string& str);
 
     /**
      * @brief convert 编码转换
@@ -24,7 +27,12 @@ public:
      */
     bool convert(const char* input, size_t len, char* output, size_t* outLen);
 private:
+#ifndef _WIN32
     iconv_t mIconv;
+    mutable std::mutex mIconvMutex;
+#endif
+    std::string mFromCharset;
+    std::string mToCharset;
 };
 
 extern Encoding* encOut;

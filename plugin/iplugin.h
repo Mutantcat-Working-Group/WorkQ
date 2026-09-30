@@ -14,7 +14,7 @@ public:
     virtual void unInit();
 
 protected:
-    FeiqWin* mFeiq;
+    FeiqWin* mFeiq = nullptr;
 };
 
 class PluginManager
@@ -28,8 +28,8 @@ public:
 };
 
 #define REGISTER_PLUGIN(name, PluginCls)\
-__attribute__((constructor)) void register##PluginCls()\
-{\
+static bool register_##PluginCls = [](){\
     PluginManager::instance().allPlugins[name]=new PluginCls();\
-}
+    return true;\
+}();
 #endif // IPLUGIN_H

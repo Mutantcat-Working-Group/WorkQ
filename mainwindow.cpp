@@ -2,14 +2,15 @@
 #include "ui_mainwindow.h"
 #include <thread>
 #include <QDir>
+#include <QFile>
 #include <QDebug>
 #include <QMessageBox>
-#include <QTextCodec>
 #include <QFileDialog>
 #include <QDateTime>
-#include <QtMac>
+#include <QThread>
+#include <QMetaObject>
+#include <QTimer>
 #include "addfellowdialog.h"
-#include <QProcess>
 #include "platformdepend.h"
 #include "feiqwin.h"
 
@@ -22,11 +23,25 @@ MainWindow::MainWindow(QWidget *parent) :
 
     connect(this, SIGNAL(showErrorAndQuit(QString)), this, SLOT(onShowErrorAndQuit(QString)));
 
-    //加载配置
-    auto settingFilePath = QDir::home().filePath(".feiq_setting.ini");
+    //加载配置，兼容旧的 .feiq_setting.ini
+    auto settingFilePath = QDir::home().filePath(".workq_setting.ini");
+    auto oldSettingFilePath = QDir::home().filePath(".feiq_setting.ini");
+    if (!QFile::exists(settingFilePath) && QFile::exists(oldSettingFilePath))
+    {
+        QFile oldFile(oldSettingFilePath);
+        if (oldFile.open(QIODevice::ReadOnly))
+        {
+            QFile newFile(settingFilePath);
+            if (newFile.open(QIODevice::WriteOnly))
+            {
+                newFile.write(oldFile.readAll().replace("mac飞秋", "我Q"));
+                newFile.close();
+            }
+            oldFile.close();
+        }
+    }
     mSettings = new Settings(settingFilePath, QSettings::IniFormat);
-    mSettings->setIniCodec(QTextCodec::codecForName("UTF-8"));
-    mTitle = mSettings->value("app/title", "mac飞秋").toString();
+    mTitle = mSettings->value("app/title", "我Q").toString();
     setWindowTitle(mTitle);
 
     //初始化搜索对话框
@@ -83,16 +98,17 @@ MainWindow::MainWindow(QWidget *parent) :
     //初始化平台相关特性
     PlatformDepend::instance().setMainWnd(this);
 
-    //初始化飞秋引擎
+    //初始化我Q引擎
     connect(this, SIGNAL(feiqViewEvent(shared_ptr<ViewEvent>)), this, SLOT(handleFeiqViewEvent(shared_ptr<ViewEvent>)));
 
-    //后台初始化通信
-    std::thread thd(&MainWindow::initFeiq, this);
-    thd.detach();
+    //初始化通信放到 GUI 事件循环里执行，避免窗口销毁时后台线程还在访问 this
+    QTimer::singleShot(0, this, &MainWindow::initFeiq);
 }
 
 MainWindow::~MainWindow()
 {
+    if (mFeiqWin)
+        mFeiqWin->unInit();
     mFeiq.stop();
     mSettings->sync();
     delete mSettings;
@@ -164,6 +180,9 @@ void MainWindow::enterEvent(QEvent *event)
 
 void MainWindow::openChartTo(const Fellow *fellow)
 {
+    if (fellow == nullptr)
+        return;
+
     mFellowList.top(*fellow);
     mRecvTextEdit->setCurFellow(fellow);
     setWindowTitle(mTitle + " - 与"+fellow->getName().c_str()+"会话中");
@@ -192,22 +211,40 @@ void MainWindow::showResult(pair<bool, string> ret, const Content* content)
 
 void MainWindow::onStateChanged(FileTask *fileTask)
 {
+    if (QThread::currentThread() != this->thread())
+    {
+        QMetaObject::invokeMethod(this, [this, fileTask](){
+            onStateChanged(fileTask);
+        }, Qt::QueuedConnection);
+        return;
+    }
+
     if (fileTask->getState()==FileTaskState::Finish)
     {
+        auto content = fileTask->getContent();
+        auto fellow = fileTask->fellow();
+        if (content == nullptr || fellow == nullptr)
+            return;
+
         auto title = QString(fileTask->getTaskTypeDes().c_str())+"完成";
         PlatformDepend::instance().showNotify(title,
-                                              fileTask->getContent()->filename.c_str(),
-                                              fileTask->fellow()->getIp().c_str());
+                                              content->filename.c_str(),
+                                              fellow->getIp().c_str());
     }
     else if (fileTask->getState()==FileTaskState::Error)
     {
+        auto content = fileTask->getContent();
+        auto fellow = fileTask->fellow();
+        if (content == nullptr || fellow == nullptr)
+            return;
+
         auto title = QString(fileTask->getTaskTypeDes().c_str())+"失败";
-        auto content = QString(fileTask->getContent()->filename.c_str());
-        content += "\n";
-        content += fileTask->getDetailInfo().c_str();
+        auto file = QString(content->filename.c_str());
+        file += "\n";
+        file += fileTask->getDetailInfo().c_str();
         PlatformDepend::instance().showNotify(title,
-                                              content,
-                                              fileTask->fellow()->getIp().c_str());
+                                              file,
+                                              fellow->getIp().c_str());
     }
 
     if (mDownloadFileDlg->isVisible())
@@ -218,6 +255,14 @@ void MainWindow::onStateChanged(FileTask *fileTask)
 
 void MainWindow::onProgress(FileTask *fileTask)
 {
+    if (QThread::currentThread() != this->thread())
+    {
+        QMetaObject::invokeMethod(this, [this, fileTask](){
+            onProgress(fileTask);
+        }, Qt::QueuedConnection);
+        return;
+    }
+
     if (mDownloadFileDlg->isVisible())
     {
         emit progressChanged(fileTask);
@@ -231,7 +276,7 @@ void MainWindow::onEvent(shared_ptr<ViewEvent> event)
 
 void MainWindow::onShowErrorAndQuit(const QString &text)
 {
-    QMessageBox::warning(this, "出错了，为什么？你猜！", text, "退出应用");
+    QMessageBox::warning(this, "出错了，为什么？你猜！", text, QMessageBox::Close);
 
     QApplication::exit(-1);
 }
@@ -332,12 +377,15 @@ void MainWindow::notifyUnshown(UnshownMessage& umsg)
         auto e = static_cast<const MessageViewEvent*>(event);
         auto fellow = e->fellow.get();
         QString text="";
-        bool first=false;
+        bool first=true;
         for (auto content : e->contents)
         {
             auto t = simpleTextOf(content.get());
             if (first)
+            {
                 text = t;
+                first=false;
+            }
             else
                 text = text+"\n"+t;
         }
@@ -347,6 +395,9 @@ void MainWindow::notifyUnshown(UnshownMessage& umsg)
 
 long MainWindow::showNotification(const Fellow *fellow, const QString &text)
 {
+    if (fellow == nullptr)
+        return 0;
+
     QString content(text);
     if (content.length()>100)
         content = content.left(100)+"...";
@@ -468,7 +519,7 @@ vector<const Fellow *> MainWindow::fellowSearchDriver(const QString &text)
 
 void MainWindow::initFeiq()
 {
-    //配置飞秋
+    //配置我Q
     auto name = mSettings->value("user/name").toString();
     if (name.isEmpty())
     {
@@ -477,7 +528,7 @@ void MainWindow::initFeiq()
     }
 
     mFeiq.setMyName(name.toStdString());
-    mFeiq.setMyHost(mSettings->value("user/host","feiq by cy").toString().toStdString());
+    mFeiq.setMyHost(mSettings->value("user/host","WorkQ").toString().toStdString());
 
     auto customGrroup = mSettings->value("network/custom_group", "").toString();
     if (!customGrroup.isEmpty())
@@ -501,14 +552,14 @@ void MainWindow::initFeiq()
 
     mFeiq.enableIntervalDetect(60);
 
-    //启动飞秋
+    //启动我Q
     auto ret = mFeiq.start();
     if (!ret.first)
     {
         emit showErrorAndQuit(ret.second.c_str());
     }
 
-    qDebug()<<"feiq started";
+    qDebug()<<"WorkQ started";
 }
 
 void MainWindow::updateUnshownHint(const Fellow *fellow)
@@ -593,6 +644,9 @@ void MainWindow::setBadgeNumber(int number)
 
 QString MainWindow::simpleTextOf(const Content *content)
 {
+    if (content == nullptr)
+        return "";
+
     switch (content->type()) {
     case ContentType::Text:
         return static_cast<const TextContent*>(content)->text.c_str();

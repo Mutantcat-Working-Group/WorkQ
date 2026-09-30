@@ -1,4 +1,5 @@
 #include "recvtextedit.h"
+#include <QColor>
 #include <QDate>
 #include "emoji.h"
 #include <QMouseEvent>
@@ -7,6 +8,15 @@ RecvTextEdit::RecvTextEdit(QWidget *parent)
     :QTextEdit(parent)
 {
     setTextInteractionFlags(Qt::LinksAccessibleByMouse|Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+}
+
+RecvTextEdit::~RecvTextEdit()
+{
+    QTextDocument* current = document();
+    for (auto& pair : mDocs)
+        if (pair.second != current)
+            delete pair.second;
+    mDocs.clear();
 }
 
 void RecvTextEdit::mousePressEvent(QMouseEvent *e)
@@ -61,7 +71,7 @@ void RecvTextEdit::showHint(long long msSinceEpoch, bool mySelf)
         color = "green";
     }
 
-    QString hint = "<font color="+color+">"+ name+" "+timeStr(msSinceEpoch)+"</font>";
+    QString hint = "<font color="+color+">"+ name.toHtmlEscaped()+" "+timeStr(msSinceEpoch)+"</font>";
 
     moveCursor(QTextCursor::End);
     insertHtml(hint);
@@ -70,6 +80,9 @@ void RecvTextEdit::showHint(long long msSinceEpoch, bool mySelf)
 
 void RecvTextEdit::setCurFellow(const Fellow *fellow)
 {
+    if (fellow == mFellow)
+        return;
+
     if (mFellow)
         mDocs[mFellow] = document()->clone();//document将被清除或删除了，需clone
 
@@ -126,6 +139,12 @@ QString RecvTextEdit::timeStr(long long msSinceEpoch)
 
 void RecvTextEdit::showContent(const Content *content, bool mySelf)
 {
+    if (content == nullptr)
+    {
+        showUnSupport();
+        return;
+    }
+
     switch (content->type())
     {
     case ContentType::File:
@@ -150,11 +169,12 @@ void RecvTextEdit::showFile(const FileContent *content, bool fromMySelf)
 {
     if (content->fileType == IPMSG_FILE_REGULAR)
     {
-        stringstream ss;
-        ss<<"<a href="<<content->packetNo<<"_"<<content->fileId<<"_"<<(fromMySelf?"up":"down")<<">"
-         <<content->filename<<"("<<content->size<<")"
-        <<"</a>";
-        insertHtml(ss.str().c_str());
+        QString link = QString::number(content->packetNo)+"_"
+                +QString::number(content->fileId)+"_"
+                +(fromMySelf?"up":"down");
+        QString text = QString::fromStdString(content->filename).toHtmlEscaped()
+                +"("+QString::number(content->size)+")";
+        insertHtml("<a href=\""+link+"\">"+text+"</a>");
     }
     else
     {
