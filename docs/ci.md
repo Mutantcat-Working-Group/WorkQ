@@ -18,6 +18,7 @@
 - Windows 的安装包和 `WorkQ.exe` 使用 CI 内临时生成的自签名代码签名证书签名，仅用于消除无签名提示；正式发布如需公开信任，可改为配置真实的 PFX/证书 secret。
 - Linux AppImage 通过 `linuxdeploy` + Qt 插件生成，附带桌面文件和图标。
 - Windows arm64 使用 `win64_msvc2022_arm64_cross_compiled` 的 Qt 包，在 x64 runner 上通过 MSVC 的 `amd64_arm64` 交叉编译，其余 Windows 步骤与 x86_64 相同。
+- 各平台图标统一取自仓库根目录的 `icon.png`：macOS 生成 `.icns`，Windows 生成 `.ico`，Linux 生成 PNG。
 
 版本号固定为 `1.0.<构建日期>`，构建日期按北京时间（UTC+8）当天计算，例如 2026-09-30 构建得到 `1.0.20260930`。需要调整主/次版本时改 workflow 里的 `1.0.` 前缀即可。
 
