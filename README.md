@@ -1,15 +1,17 @@
 <div align=center>
 <img src="icon.png" style="width:100px;" width="100"/>
 <h2>我Q WorkQ</h2>
-<p><a href="README.en.md">English</a></p>
 </div>
+
+[English](README.en.md) | 简体中文
 
 ### 一、产品概述
 
-- 基于 Qt 的跨平台即时通讯客户端，支持 Windows、macOS、Linux。
+- 基于 Qt 的跨平台即时通讯客户端，支持 Windows、macOS、Linux，覆盖 x86_64 / arm64 架构。
 - 中文名为“我Q”，英文名为 WorkQ；通信协议与飞秋 / IPMSG 兼容，可直接与局域网中的飞秋用户互发文本、文件与表情。
 - 支持局域网广播模式与 WorkQ-Server 远程服务器模式，兼顾本地聊天与跨网段协作。
 - 收发文本与文件沿用原协议的 GBK 编码和字节流格式，保持经典飞秋的使用习惯。
+- **发行方** 由异猫工作群（mutantcat.org）发行，GitHub: https://github.com/Mutantcat-Working-Group
 
 核心价值：
 
@@ -17,16 +19,22 @@
 - 跨平台：一套代码覆盖 Windows、macOS、Linux，并支持 x86_64 / arm64 构建。
 - 远程协作：接入 WorkQ-Server 后支持账号、私聊/群聊、历史消息与在线状态，不受广播网段限制。
 - 现代化界面：采用 QSS 统一视觉风格，保留经典飞秋操作习惯。
+- 图标统一：所有平台安装包均使用仓库根目录的 `icon.png` 作为应用图标。
 
 ### 二、功能说明
 
-#### 局域网模式
+#### 消息与文件
 
 - 收发文本、文件，与飞秋互发表情
-- 查找好友、指定 IP 添加好友
-- 窗口抖动、自定义网段穿透屏蔽了广播包的路由器
-- 未读消息好友自动置顶、系统托盘气泡通知
+- 窗口抖动提醒，未读消息好友自动置顶
+- 系统托盘气泡通知，点击可跳转到对应会话
 - 定时更新好友列表，可选按沟通频繁度排序
+
+#### 好友与网络
+
+- 自动发现局域网好友，支持指定 IP 添加好友
+- 自定义网段穿透屏蔽了广播包的路由器
+- 查找好友，支持按名称搜索
 
 #### 远程服务器模式
 
@@ -37,7 +45,7 @@
 
 ### 三、安装与下载
 
-从 [Releases](https://github.com/Mutantcat-Working-Group/WorkQ/releases) 下载对应平台安装包：
+从 [Releases](https://github.com/Mutantcat-Working-Group/WorkQ/releases/latest) 下载对应平台安装包：
 
 | 平台 | 产物 |
 | --- | --- |
@@ -47,37 +55,25 @@
 | Windows x86_64 | `WorkQ-<版本>-windows-x86_64-setup.exe` |
 | Windows arm64 | `WorkQ-<版本>-windows-arm64-setup.exe` |
 
-版本号按 `1.0.<构建日期>` 组织，例如 `1.0.20260930`。各平台安装包统一使用仓库根目录的 `icon.png` 作为应用图标。
+版本号按 `1.0.<构建日期>` 组织，例如 `1.0.20260930`。
+
+1. **Linux**：下载 AppImage 后赋予执行权限，直接运行。
+   ```bash
+   chmod +x WorkQ-*.AppImage
+   ./WorkQ-*.AppImage
+   ```
+2. **macOS**：打开 DMG，将“我Q”拖入“Applications”文件夹即可。
+3. **Windows**：运行安装包，按提示完成安装，安装包为简体中文界面。
 
 ### 四、快速上手
 
-1. 下载对应平台安装包并安装，或直接运行 AppImage / DMG 中的程序。
-2. 启动后在设置中填写用户名与主机名，保存后自动写入 `~/.workq_setting.ini`。
-3. 局域网好友会被自动发现；对方不在广播范围内时，可通过“指定 IP 添加好友”加入。
-4. 需要跨网段聊天时，先部署 WorkQ-Server，然后在“服务器设置”中启用远程服务器模式，填写地址、用户名与密码并测试连接。
+1. **设置身份**：启动后在设置中填写用户名与主机名，保存后自动写入 `~/.workq_setting.ini`。
+2. **添加好友**：局域网好友会自动发现；对方不在广播范围内时，通过“指定 IP 添加好友”手动加入。
+3. **发送消息**：双击好友开始聊天，`Ctrl+Enter`（macOS 为 `Cmd+Enter`）发送，`Enter` 换行。
+4. **发送文件**：将文件拖入聊天窗口，或点击工具栏的文件按钮选择文件。
+5. **远程模式**：需要跨网段聊天时，先部署 [WorkQ-Server](https://github.com/Mutantcat-Working-Group/WorkQ-Server)，然后在“服务器设置”中启用远程服务器模式，填写地址、用户名与密码并测试连接。
 
-### 五、服务器模式
-
-客户端通过 [WorkQ-Server](https://github.com/Mutantcat-Working-Group/WorkQ-Server) 提供账号认证、私聊/群聊、历史消息、已读状态，以及基于 SignalR 的实时消息与在线状态广播。
-
-1. 在 WorkQ-Server Releases 下载对应平台的自包含服务端并运行。
-2. 在客户端“服务器设置”中填写 `http://host:port`、用户名与密码。
-3. 保存并重连后，服务器会话会以好友形式显示在列表中，操作方式与局域网模式一致。
-
-### 六、构建与打包
-
-项目使用 qmake 构建，需要 Qt 6（C++17）开发环境；`workq.pro` 在 Qt 6 以下版本会直接报错。
-
-```bash
-qmake workq.pro
-make
-```
-
-Windows 下可在 Qt Creator 中直接打开 `workq.pro`，或使用 MinGW/MSVC 工具链编译。macOS/Linux 安装对应平台的 Qt 6 开发包后执行上面的命令即可。
-
-仓库内置 GitHub Actions（`.github/workflows/build.yml`），自动产出 Linux AppImage、macOS 双架构 DMG、Windows x86_64/arm64 NSIS 安装包。macOS 产物带 ad-hoc 签名与 Applications 快捷方式，Windows 安装包为简体中文界面并使用 CI 自签名证书。详见 [docs/ci.md](docs/ci.md)。
-
-### 七、配置
+### 五、配置
 
 配置文件为 `~/.workq_setting.ini`。首次启动时若检测到旧版 `~/.feiq_setting.ini`，会自动复制并迁移，旧文件不会被删除。
 
@@ -103,14 +99,14 @@ username = user
 remember = 1 ;记住密码
 ```
 
-### 八、平台差异
+### 六、平台差异
 
 * 通知：各平台均使用系统托盘气泡（`QSystemTrayIcon`），点击气泡或托盘图标可跳到对应会话。
 * 未读角标：暂未实现原生角标，未读数显示在好友列表条目中。
 * 发送快捷键：`Ctrl+Enter` 与 mac 的 `Cmd+Enter` 均可发送。
 * 图标：所有平台统一从根目录 `icon.png` 生成应用图标（macOS `.icns`、Windows `.ico`、Linux PNG）。
 
-### 九、开发进度
+### 七、开发进度
 
 - [X] 局域网文本、文件收发
 - [X] 与飞秋互发表情
@@ -125,7 +121,7 @@ remember = 1 ;记住密码
 - [ ] 图片、文件夹收发
 - [ ] 日志完善
 
-### 十、开发者
+### 八、开发者
 
 界面的实现与飞秋协议部分是分离的。
 
@@ -136,3 +132,5 @@ remember = 1 ;记住密码
 2. 点击通知跳转到对应会话
 
 引用代码，请注明代码出处。
+
+[GPL-3.0](LICENSE)
